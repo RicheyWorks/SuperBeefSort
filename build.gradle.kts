@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    application
 }
 
 group = "io.github.richeyworks"
@@ -7,6 +8,15 @@ version = "0.1.0"
 
 java {
     withSourcesJar()
+}
+
+application {
+    mainClass.set("io.github.richeyworks.superbeefsort.demo.Demo")
+    // csrbt-core logs through log4j-api with no bundled backend; point at log4j's built-in
+    // no-config SimpleLogger so the demo doesn't print "could not find a logging provider".
+    applicationDefaultJvmArgs = listOf(
+        "-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory"
+    )
 }
 
 // Mirror CSRBT: 17-target bytecode from whatever JDK runs Gradle (Gradle 9 needs 17+). No

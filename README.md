@@ -13,8 +13,9 @@ respecting its health gates and order statistics.
 
 It's not a sorting library — it's an engine: **profile → select → sort → feed**, every stage
 pluggable. Java is the spine; Rust kernels, a Python intelligence service, and a web visualizer are
-later phases, all optional accelerators behind the same interfaces (see
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)).
+later phases, all optional accelerators behind the same interfaces.
+
+**Docs:** [architecture & design](docs/ARCHITECTURE.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md)
 
 ## Status
 
@@ -37,6 +38,7 @@ git clone https://github.com/RicheyWorks/CSRBT.git
 git clone https://github.com/RicheyWorks/SuperBeefSort.git
 cd SuperBeefSort
 ./gradlew build      # compiles SuperBeefSort + CSRBT, runs the test suite
+./gradlew run        # demo: live pipeline trace + CSRBT order statistics
 ```
 
 ## Quick start

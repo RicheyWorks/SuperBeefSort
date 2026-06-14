@@ -8,6 +8,7 @@ import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
 import io.github.richeyworks.superbeefsort.strategy.CountingSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 
@@ -25,32 +26,35 @@ public final class RuleBasedStrategySelector implements StrategySelector {
     public SortPlan select(DataProfile profile, SelectionPolicy policy, StrategyRegistry registry) {
         StrategyId fallback = IntroSortStrategy.ID;
         return switch (policy) {
-            case FIXED_INTRO -> new SortPlan(IntroSortStrategy.ID, FeedMode.BALANCED, fallback, "fixed introsort");
-            case STABLE -> new SortPlan(MergeSortStrategy.ID, FeedMode.BALANCED, fallback, "stability requested");
+            case FIXED_INTRO -> new SortPlan(IntroSortStrategy.ID, FeedMode.BULK, fallback, "fixed introsort");
+            case STABLE -> new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested");
             case SMART -> smart(profile, fallback);
         };
     }
 
     private SortPlan smart(DataProfile p, StrategyId fallback) {
         if (p.tiny()) {
-            return new SortPlan(InsertionSortStrategy.ID, FeedMode.BALANCED, fallback, "tiny input -> insertion");
+            return new SortPlan(InsertionSortStrategy.ID, FeedMode.BULK, fallback, "tiny input -> insertion");
         }
         if (p.nearlySorted()) {
-            return new SortPlan(InsertionSortStrategy.ID, FeedMode.BALANCED, fallback,
-                    "nearly sorted (" + pct(p.sortednessRatio()) + ") -> adaptive insertion");
+            // Adjacency sortedness is high, but a few far-displaced elements can still mean many
+            // total inversions, where plain insertion (O(n + inversions)) blows up. TimSort is
+            // run-aware AND O(n log n) worst case, so it stays fast in both shapes.
+            return new SortPlan(JdkSortStrategy.ID, FeedMode.BULK, fallback,
+                    "nearly sorted (" + pct(p.sortednessRatio()) + ") -> run-aware TimSort");
         }
         KeyStats ks = p.keyStats();
         if (ks != null) {
             long span = ks.span();
             boolean counting = ks.countingFeasible() && span <= Math.max(COUNTING_RANGE_FLOOR, 4L * p.size());
             if (counting) {
-                return new SortPlan(CountingSortStrategy.ID, FeedMode.BALANCED, fallback,
+                return new SortPlan(CountingSortStrategy.ID, FeedMode.BULK, fallback,
                         "bounded integer keys (range " + (span + 1) + ") -> counting sort");
             }
-            return new SortPlan(RadixSortStrategy.ID, FeedMode.BALANCED, fallback,
+            return new SortPlan(RadixSortStrategy.ID, FeedMode.BULK, fallback,
                     "integer keys (~" + p.distinctEstimate() + " distinct) -> LSD radix");
         }
-        return new SortPlan(IntroSortStrategy.ID, FeedMode.BALANCED, fallback, "general input -> introsort");
+        return new SortPlan(IntroSortStrategy.ID, FeedMode.BULK, fallback, "general input -> introsort");
     }
 
     private static String pct(double ratio) {

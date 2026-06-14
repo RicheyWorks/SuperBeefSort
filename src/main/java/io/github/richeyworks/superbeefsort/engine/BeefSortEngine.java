@@ -8,6 +8,7 @@ import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.core.SortResult;
 import io.github.richeyworks.superbeefsort.core.SortStrategy;
 import io.github.richeyworks.superbeefsort.feed.BalancedBuildFeeder;
+import io.github.richeyworks.superbeefsort.feed.BulkBuildFeeder;
 import io.github.richeyworks.superbeefsort.feed.CsrbtTarget;
 import io.github.richeyworks.superbeefsort.feed.DirectFeeder;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
@@ -126,6 +127,7 @@ public final class BeefSortEngine<K> {
         return switch (mode) {
             case DIRECT -> new DirectFeeder<>();
             case BALANCED -> new BalancedBuildFeeder<>();
+            case BULK -> new BulkBuildFeeder<>();
             case HEALTH_GATED -> new HealthGatedFeeder<>();
         };
     }

@@ -1,6 +1,7 @@
 plugins {
     `java-library`
     application
+    id("me.champeau.jmh") version "0.7.3" // JMH micro-benchmarks: ./gradlew jmh
 }
 
 group = "io.github.richeyworks"
@@ -38,4 +39,14 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform() // picks up both the Jupiter and jqwik engines
+}
+
+// JMH rig (mirrors CSRBT's config). Benchmarks live in src/jmh/java. Run: ./gradlew jmh
+jmh {
+    jmhVersion = "1.37"
+    fork = 1
+    warmupIterations = 3
+    iterations = 5
+    resultFormat = "JSON"
+    resultsFile = layout.buildDirectory.file("reports/jmh/results.json")
 }

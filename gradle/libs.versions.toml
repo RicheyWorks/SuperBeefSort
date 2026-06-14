@@ -1,0 +1,10 @@
+# Versions matched to CSRBT's catalog (verified 2026-06) so the two projects share a test stack.
+[versions]
+junit = "5.14.4"
+jqwik = "1.9.3"
+
+[libraries]
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }

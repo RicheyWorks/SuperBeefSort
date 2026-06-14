@@ -1,5 +1,6 @@
 # SuperBeefSort
 
+[![CI](https://github.com/RicheyWorks/SuperBeefSort/actions/workflows/ci.yml/badge.svg)](https://github.com/RicheyWorks/SuperBeefSort/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Java 17](https://img.shields.io/badge/Java-17-orange.svg)](https://adoptium.net/)
 [![Build: Gradle](https://img.shields.io/badge/build-Gradle%209-02303A.svg?logo=gradle)](https://gradle.org/)
@@ -39,6 +40,7 @@ git clone https://github.com/RicheyWorks/SuperBeefSort.git
 cd SuperBeefSort
 ./gradlew build      # compiles SuperBeefSort + CSRBT, runs the test suite
 ./gradlew run        # demo: live pipeline trace + CSRBT order statistics
+./gradlew jmh        # JMH benchmarks: strategies by data shape + bulk vs balanced feed
 ```
 
 ## Quick start

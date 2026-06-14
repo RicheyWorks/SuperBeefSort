@@ -50,11 +50,24 @@ capability-gates them.
 sorted distinct run (deepest level red, root black; verified across n=1..3000). SBS feeds via the new
 `FeedMode.BULK` / `BulkBuildFeeder`, which de-dups the sorted run and bulk-builds an empty `OrderedSet`
 target in O(n), falling back to balanced add for non-empty / ensemble targets. This collapses the feed
-cost the demo showed dominating (~8× the sort). **This edited the CSRBT repo too — commit it there
-host-side.**
+cost the demo showed dominating (~8× the sort → ~2× faster; demo feed ~45 ms → ~21 ms, then ~14 ms
+after the `buildFromSorted` size/window trim that drops `resyncFromEngine`'s extra `inOrder()` pass).
+Documented in CSRBT `docs/ADR-014`. **This edited the CSRBT repo too — commit it there host-side.**
+
+**Cost-model selector (opt-in):** `CostModelStrategySelector` estimates each strategy's cost from the
+profile (`n log n` vs run-aware TimSort vs `n+range` counting vs fixed-pass radix) and picks the min —
+e.g. linear counting over TimSort for nearly-sorted *integer* data. Wired via `BeefSort.selector(...)`;
+`RuleBasedStrategySelector` stays the default.
+
+**Tooling:** JMH suite in `src/jmh/java` (`SortStrategyBenchmark` across data shapes, `FeedBenchmark`
+bulk vs balanced) — run `./gradlew jmh`; note `build` does NOT compile `src/jmh`, so use `jmh` /
+`compileJmhJava` to verify the benchmarks. GitHub Actions CI (`.github/workflows/ci.yml`) checks out SBS
+plus a sibling CSRBT clone, builds + tests + compiles the benchmarks; green only once CSRBT's bulk-build
+commit is pushed.
 
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
-`NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`; CSRBT: `BulkBuildTest`.
+`NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`;
+CSRBT: `BulkBuildTest`.
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -98,9 +111,6 @@ Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedS
   TimSort (O(n log n) worst case), so a "locally sorted" input with distant inversions no longer blows
   up the way plain insertion did (the demo surfaced 16M moves before this fix). A true run- or
   inversion-count signal in the profiler is still a nice-to-have.
-- No CI yet; README badges are static. A GitHub Actions workflow would need to check out CSRBT
-  alongside SBS (composite build) before `./gradlew build`.
-- No runnable demo `main` or JMH benchmark harness yet (was offered, deferred).
 - Parallel/streaming/external sort not implemented.
 
 ## Next steps (roadmap)
@@ -116,8 +126,9 @@ Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedS
 - **Phase 5 — observability + scale.** TypeScript step visualizer over the `SortEvent` stream;
   distributed/external sort.
 
-Quick wins if picking up cold: add the demo `main` + JMH module (cheap, high signal), and a CI
-workflow.
+Quick wins if picking up cold: push host-side first (including the sibling CSRBT bulk-build commit,
+or CI stays red), then take an IDEAS "top pick" — the learned/autotuned selector or the web
+visualizer — before the heavier Phase 2 Rust kernel.
 
 ## Repo / push status
 

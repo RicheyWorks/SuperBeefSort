@@ -49,6 +49,11 @@ public final class BeefSortEngine<K> {
                 keyEncoder);
     }
 
+    /** Custom selector with the default registry + profiler. */
+    public BeefSortEngine(StrategySelector selector, KeyEncoder<K> keyEncoder) {
+        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(), selector, keyEncoder);
+    }
+
     public BeefSortEngine(StrategyRegistry registry, DataProfiler<K> profiler, StrategySelector selector) {
         this(registry, profiler, selector, null);
     }

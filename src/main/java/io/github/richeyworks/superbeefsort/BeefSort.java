@@ -10,6 +10,7 @@ import io.github.richeyworks.superbeefsort.engine.SortRunResult;
 import io.github.richeyworks.superbeefsort.feed.CsrbtTarget;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
+import io.github.richeyworks.superbeefsort.select.StrategySelector;
 
 import java.util.Comparator;
 import java.util.List;
@@ -35,6 +36,7 @@ public final class BeefSort<K> {
     private FeedMode feedMode; // null -> the plan decides
     private SortObserver observer = SortObserver.NOOP;
     private KeyEncoder<K> keyEncoder; // null -> comparison sorts only
+    private StrategySelector selector; // null -> engine default (rule-based)
 
     private BeefSort(Comparator<? super K> comparator) {
         this.comparator = comparator;
@@ -70,6 +72,12 @@ public final class BeefSort<K> {
         return this;
     }
 
+    /** Override the strategy selector (e.g. a {@code CostModelStrategySelector}). */
+    public BeefSort<K> selector(StrategySelector strategySelector) {
+        this.selector = strategySelector;
+        return this;
+    }
+
     /** Sort only. */
     public SortRunResult<K> run() {
         return engine().sort(source, comparator, spec());
@@ -86,7 +94,9 @@ public final class BeefSort<K> {
     }
 
     private BeefSortEngine<K> engine() {
-        return new BeefSortEngine<>(keyEncoder);
+        return selector == null
+                ? new BeefSortEngine<>(keyEncoder)
+                : new BeefSortEngine<>(selector, keyEncoder);
     }
 
     private JobSpec spec() {

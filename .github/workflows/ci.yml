@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # SuperBeefSort composite-builds against ../CSRBT, so both repos are checked out as siblings
+      # inside the workspace and Gradle is run from the SuperBeefSort subdirectory.
+      - name: Check out SuperBeefSort
+        uses: actions/checkout@v4
+        with:
+          path: SuperBeefSort
+
+      - name: Check out CSRBT (sibling, for the composite build)
+        uses: actions/checkout@v4
+        with:
+          repository: RicheyWorks/CSRBT
+          path: CSRBT
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build and test
+        working-directory: SuperBeefSort
+        run: |
+          chmod +x gradlew
+          ./gradlew build --no-daemon --stacktrace
+
+      # `build` does not compile the jmh source set, so verify the benchmarks separately.
+      - name: Compile benchmarks
+        working-directory: SuperBeefSort
+        run: ./gradlew compileJmhJava --no-daemon

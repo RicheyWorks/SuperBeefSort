@@ -29,7 +29,7 @@ Python intelligence service are optional later-phase accelerators behind the sam
 | 2 | Rust radix kernel via Panama FFM (Java fallback retained) | planned |
 | 3 | Ensemble range-sharded feeding + streaming/backpressure | planned |
 | 4–5 | Python ML selection · distributed / external sort | planned |
-| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling · `SortReport` · JMH · CI · web step-visualizer | ✅ done |
+| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** | ✅ done |
 
 ## Build & test
 
@@ -48,8 +48,10 @@ cd SuperBeefSort
 
 Then open **`web/visualizer.html`** in any browser for the step-by-step visualizer — profile → select →
 sort → feed into a live red-black tree, with an **Auto-tune** panel that learns the cheapest
-strategy per data shape, **record/replay** tokens to reproduce an exact run, and a live **CSRBT
-order-statistics** explorer (select / rank / median) on the built tree. No build step; pure HTML/JS/SVG.
+strategy per data shape, the profiler's **inversion** signal surfaced live, **record/replay** (compact
+tokens *plus* self-contained capture files you can export/import to replay a recorded run verbatim), and a
+live **CSRBT order-statistics** explorer (select / rank / median) on the built tree. No build step; pure
+HTML/JS/SVG.
 
 ## Quick start
 
@@ -74,7 +76,8 @@ BeefSort.with(Comparator.<Integer>naturalOrder())
 
 Without a `keyEncoder`, the engine behaves exactly like Phase 0 (comparison sorts only). Swap the
 selection brain with `.selector(new BanditStrategySelector())` — it learns the cheapest strategy per
-data shape across runs — and call `SortReport.of(result)` for a one-line dashboard of comparisons,
+data shape across runs — add `.deterministic(seed)` for an exactly reproducible run (it seeds the
+randomized quicksort pivot), and call `SortReport.of(result)` for a one-line dashboard of comparisons,
 moves, feed time, and end-to-end throughput.
 
 ## How it works
@@ -83,9 +86,9 @@ One pipeline, every stage pluggable:
 
 | Stage | Component | Behavior |
 |-------|-----------|----------|
-| Profile | `IntelligentDataProfiler` | sortedness + longest run, distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
-| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; the bandit learns the cheapest per context from observed cost |
-| Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · 3-way quick · heap · intro · JDK · counting · LSD radix |
+| Profile | `IntelligentDataProfiler` | sortedness + longest run + a true **inversion count** (global disorder, exact or sampled), distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
+| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; genuinely-few-inversion inputs route to adaptive insertion, and the cost-model/bandit can pick the learned sort — the bandit learns the cheapest per context from observed cost |
+| Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · 3-way quick · heap · intro · JDK · counting · LSD radix · **learned** (distribution-adaptive sample sort) |
 | Feed | `SortFeeder` + `CsrbtTarget` | `BulkBuildFeeder` (O(n)) · `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `PrecisionFeeder` (validate-every-insert) · `DirectFeeder` |
 
 ### Two design notes
@@ -97,9 +100,15 @@ it and calls CSRBT's `selfRepair()` between batches.
 
 ![Feed modes — why feeding a sorted run in the right order minimizes CSRBT rotations](docs/feed-modes.svg)
 
-**Safe non-comparison sorts.** Counting/radix need integer keys, supplied via a `KeyEncoder`. The
-profiler samples the data to confirm the encoding agrees with the comparator's order; if it doesn't,
+**Safe non-comparison sorts.** Counting/radix/learned need integer keys, supplied via a `KeyEncoder`.
+The profiler samples the data to confirm the encoding agrees with the comparator's order; if it doesn't,
 integer stats are withheld and the engine stays on comparison sorts — never silently reordering keys.
+
+**Proven robust under attack.** Every strategy is differential-tested against the JDK reference across
+pathological shapes (sorted, reversed, all-equal, sawtooth, organ-pipe, few-distinct). A Bentley–McIlroy
+*median-of-three killer* then proves introsort's depth guard actually fires: on the same adversarial array
+a plain (unguarded) quicksort goes quadratic (`> n²/5` comparisons) while the engine's introsort stays
+sub-quadratic (`≤ 8·n·log₂n`) — and `.deterministic(seed)` makes any such run exactly reproducible.
 
 ### Performance (measured)
 
@@ -128,7 +137,7 @@ src/main/java/io/github/richeyworks/superbeefsort/
 ├── core/      SortStrategy, SortBuffer (metered), KeyEncoder, SortContext, SortObserver, SortEvent
 ├── profile/   IntelligentDataProfiler, Hll, DataProfile, KeyStats, Distribution
 ├── select/    StrategySelector · RuleBasedStrategySelector · CostModelStrategySelector · BanditStrategySelector (+ LearningStrategySelector) · SortPlan · SelectionPolicy
-├── strategy/  SortingNetwork · Insertion · Merge · Quick (3-way) · Heap · Intro · JDK · Counting · Radix
+├── strategy/  SortingNetwork · Insertion · Merge · Quick (3-way) · Heap · Intro · JDK · Counting · Radix · Learned
 ├── registry/  StrategyRegistry, StrategyProvider (SPI), BuiltinStrategyProvider
 ├── feed/      CsrbtTarget, FeedMode, BulkBuildFeeder, BalancedBuildFeeder, HealthGatedFeeder, PrecisionFeeder, DirectFeeder
 ├── engine/    BeefSortEngine, JobSpec, SortRunResult
@@ -136,7 +145,8 @@ src/main/java/io/github/richeyworks/superbeefsort/
 ```
 
 Alongside `src/main`: `src/jmh/java/…/bench/` (JMH benchmarks), `src/test/java/…/` (JUnit + jqwik
-suite), and `web/visualizer.html` (the dependency-free step-visualizer).
+suite — property, differential, and anti-quicksort chaos tests), and `web/visualizer.html` (the
+dependency-free step-visualizer).
 
 ## License
 

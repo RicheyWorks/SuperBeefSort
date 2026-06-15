@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<!--
+  SuperBeefSort — Web Step-Visualizer
+  ===================================
+  Watch the engine pipeline run end to end: profile -> select -> sort -> feed.
+  The left panel animates the selected sort strategy (compares / swaps / partitions);
+  the right panel animates the sorted run building into a CSRBT red-black tree.
+
+  Single self-contained file, no dependencies. Open it in any browser.
+
+  Faithful to the engine's vocabulary:
+    - SortEvent.Type   : JOB_STARTED, PROFILED, PLAN_SELECTED, SORT_COMPLETED,
+                         FEED_STARTED, FEED_COMPLETED, JOB_COMPLETED, ERROR
+    - StrategyId       : insertion, merge, quick.threeway, heap, intro,
+                         jdk.timsort, counting, radix.lsd
+    - FeedMode         : DIRECT, BALANCED, BULK, HEALTH_GATED
+    - SMART selector   : mirrors RuleBasedStrategySelector (tiny<=16,
+                         nearlySorted>=0.90, counting when span<=max(2^16, 4n))
+    - RB bulk-build    : mirrors RedBlackTree.buildBalanced (median split,
+                         deepest level red, root black) -> a valid O(n) build
+  Per-comparison SortEvents are a "later phase" in the engine; this tool is that
+  step-level stream made visible. CSRBT keeps no rotation counter and emits no
+  rotation event, so rotations here are shown structurally, not as a TreeEvent.
+
+  The pure pipeline (generate/profile/select/sort/feed/validate) is exposed on
+  globalThis.SBSViz with a selfTest(); the DOM layer only boots when `document`
+  exists, so the core can be unit-tested headlessly.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SuperBeefSort — Step Visualizer</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #131a23; --panel2: #0f151d; --edge: #243140;
+    --ink: #e6edf3; --muted: #8b98a8; --faint: #5a6675;
+    --accent: #534ab7;       /* CSRBT purple */
+    --beef: #d9603b;         /* SBS orange   */
+    --ok: #1d9e75; --warn: #d6a14a; --bad: #e5534b;
+    --cmp: #d6a14a; --pivot: #d9603b; --done: #1d9e75; --idle: #3d4d61;
+    --rbR: #c4453b; --rbB: #2b3340; --rbStroke:#0a0e14;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  header { padding: 14px 18px 6px; }
+  h1 { margin: 0; font-size: 18px; letter-spacing: .2px; font-weight: 650; }
+  h1 .beef { color: var(--beef); } h1 .csrbt { color: #8a82ff; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  /* pipeline strip */
+  .pipe { display: flex; gap: 8px; align-items: stretch; margin: 12px 18px 4px; flex-wrap: wrap; }
+  .stage {
+    flex: 1 1 160px; min-width: 150px; background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 8px; padding: 8px 10px; position: relative;
+  }
+  .stage .k { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+  .stage .v { font-family: var(--mono); font-size: 12.5px; margin-top: 3px; color: var(--ink); min-height: 17px; word-break: break-word; }
+  .stage .v small { color: var(--muted); }
+  .stage.active { border-color: var(--beef); box-shadow: 0 0 0 1px var(--beef) inset; }
+  .stage.feedhi.active { border-color: #8a82ff; box-shadow: 0 0 0 1px #8a82ff inset; }
+  .arrow { align-self: center; color: var(--faint); font-size: 16px; }
+
+  /* controls */
+  .controls { display: flex; gap: 12px 16px; flex-wrap: wrap; align-items: flex-end; margin: 10px 18px; padding: 12px 14px; background: var(--panel2); border: 1px solid var(--edge); border-radius: 8px; }
+  .ctl { display: flex; flex-direction: column; gap: 4px; }
+  .ctl label { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  select, input[type=range] { accent-color: var(--beef); }
+  select { background: #0c121a; color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: 5px 7px; font-size: 12.5px; font-family: var(--mono); }
+  .switch { display: flex; align-items: center; gap: 7px; user-select: none; cursor: pointer; padding-bottom: 5px; }
+  .switch input { display: none; }
+  .switch .track { width: 34px; height: 19px; border-radius: 19px; background: #2a3543; position: relative; transition: background .15s; }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #cdd6e0; transition: transform .15s; }
+  .switch input:checked + .track { background: var(--beef); }
+  .switch input:checked + .track::after { transform: translateX(15px); }
+  .btns { display: flex; gap: 8px; margin-left: auto; }
+  button { font-family: inherit; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 8px 15px; border: 1px solid var(--edge); background: #1a232f; color: var(--ink); cursor: pointer; transition: filter .12s, border-color .12s; }
+  button:hover { filter: brightness(1.18); }
+  button.primary { background: var(--beef); border-color: var(--beef); color: #1a0f0a; }
+  button.ghost { background: transparent; }
+  button:disabled { opacity: .4; cursor: not-allowed; filter: none; }
+
+  /* panels */
+  .stage-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 18px 12px; }
+  @media (max-width: 880px){ .stage-wrap { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel .head { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--edge); }
+  .panel .head .t { font-weight: 650; font-size: 12.5px; }
+  .panel .head .t .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+  .panel .head .meta { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .panel .body { position: relative; height: 340px; }
+  svg { display: block; width: 100%; height: 100%; }
+  .badge { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 5px; }
+  .badge.ok { background: rgba(29,158,117,.16); color: #5bd6ab; }
+  .badge.bad { background: rgba(229,83,75,.16); color: #ff8a82; }
+
+  /* bars */
+  rect.bar { transition: fill .12s; }
+  .blabel { font-family: var(--mono); font-size: 9px; fill: var(--muted); }
+
+  /* tree */
+  .rb-edge { stroke: #34425a; stroke-width: 2; }
+  g.node { transition: transform .32s cubic-bezier(.4,0,.2,1); }
+  g.node circle { stroke: var(--rbStroke); stroke-width: 2; transition: fill .2s; }
+  g.node.red circle { fill: var(--rbR); }
+  g.node.black circle { fill: var(--rbB); }
+  g.node text { fill: #f2f5f9; font-family: var(--mono); font-size: 11px; text-anchor: middle; dominant-baseline: central; font-weight: 600; }
+  g.node.flash circle { stroke: var(--beef); stroke-width: 3.5; }
+  g.node.justins circle { stroke: #ffd27a; stroke-width: 3.5; }
+
+  /* event log */
+  .log { margin: 0 18px 20px; background: #070b10; border: 1px solid var(--edge); border-radius: 10px; height: 168px; overflow: auto; padding: 8px 0; font-family: var(--mono); font-size: 11.5px; }
+  .log .row { padding: 1.5px 14px; display: flex; gap: 10px; white-space: pre-wrap; }
+  .log .row .tag { flex: 0 0 132px; color: var(--faint); }
+  .log .row .msg { color: var(--ink); }
+  .ev-life .tag { color: #8a82ff; } .ev-life .msg { color: #cfd8e3; }
+  .ev-sort .tag { color: var(--beef); }
+  .ev-feed .tag { color: #5bd6ab; }
+  .ev-warn .msg { color: var(--warn); }
+  .ev-err  .tag, .ev-err .msg { color: #ff8a82; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: -4px 18px 10px; color: var(--muted); font-size: 11px; align-items: center;}
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .foot { color: var(--faint); font-size: 11px; margin: 0 18px 26px; }
+  code { background: #0c121a; padding: 1px 5px; border-radius: 4px; font-family: var(--mono); color: #b9c4d2; }
+  .tuner { margin: 0 18px 12px; background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 10px 13px; }
+  .tuner .thead { display: flex; align-items: center; gap: 10px; font-size: 12.5px; margin-bottom: 8px; }
+  .tuner .thead .muted { color: var(--muted); font-size: 11px; flex: 1; }
+  button.small { padding: 5px 11px; font-size: 12px; }
+  .tctx { color: var(--muted); font-size: 11.5px; margin-bottom: 7px; }
+  .trow { display: grid; grid-template-columns: 124px 1fr 82px 46px; align-items: center; gap: 9px; padding: 2px 0; font-family: var(--mono); font-size: 11.5px; }
+  .trow.pick .tname { color: #ffd27a; }
+  .tname { white-space: nowrap; color: var(--muted); }
+  .tbarwrap { background: #0c121a; border-radius: 4px; height: 11px; overflow: hidden; }
+  .tbar { display: block; height: 100%; background: linear-gradient(90deg, #1d9e75, #d6a14a, #d9603b); transition: width .35s; }
+  .tmean { text-align: right; color: var(--ink); }
+  .tpulls { text-align: right; color: var(--faint); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="beef">SuperBeefSort</span> step-visualizer <span style="color:var(--faint);font-weight:400">→</span> <span class="csrbt">CSRBT</span></h1>
+  <div class="sub">profile → select → sort → feed, one step at a time. The sorted run builds straight into a red-black tree.</div>
+</header>
+
+<div class="pipe" id="pipe">
+  <div class="stage" data-stage="profile"><div class="k">1 · profile</div><div class="v" id="st-profile">—</div></div>
+  <div class="arrow">→</div>
+  <div class="stage" data-stage="select"><div class="k">2 · select</div><div class="v" id="st-select">—</div></div>
+  <div class="arrow">→</div>
+  <div class="stage" data-stage="sort"><div class="k">3 · sort</div><div class="v" id="st-sort">—</div></div>
+  <div class="arrow">→</div>
+  <div class="stage feedhi" data-stage="feed"><div class="k">4 · feed → csrbt</div><div class="v" id="st-feed">—</div></div>
+</div>
+
+<div class="controls">
+  <div class="ctl"><label for="shape">data shape</label>
+    <select id="shape">
+      <option value="random">random</option>
+      <option value="nearlySorted">nearly sorted</option>
+      <option value="reversed">reversed</option>
+      <option value="fewDistinct">few distinct</option>
+    </select>
+  </div>
+  <div class="ctl"><label for="size">size · <span id="sizeval">28</span></label>
+    <input type="range" id="size" min="8" max="56" value="28" step="1" />
+  </div>
+  <label class="switch" title="Supply a faithful integer KeyEncoder — unlocks counting / LSD radix in SMART selection.">
+    <input type="checkbox" id="intkeys" checked /><span class="track"></span>
+    <span>integer keys</span>
+  </label>
+  <div class="ctl"><label for="policy">policy</label>
+    <select id="policy"><option>SMART</option><option value="BANDIT">BANDIT (self-tuning)</option><option>FIXED_INTRO</option><option>STABLE</option></select>
+  </div>
+  <div class="ctl"><label for="strat">strategy</label>
+    <select id="strat">
+      <option value="auto">auto (from plan)</option>
+      <option value="insertion">insertion</option>
+      <option value="merge">merge</option>
+      <option value="quick.threeway">quick.threeway</option>
+      <option value="heap">heap</option>
+      <option value="intro">intro</option>
+      <option value="jdk.timsort">jdk.timsort</option>
+      <option value="counting">counting</option>
+      <option value="radix.lsd">radix.lsd</option>
+    </select>
+  </div>
+  <div class="ctl"><label for="feed">feed mode</label>
+    <select id="feed">
+      <option value="auto">auto (BULK)</option>
+      <option value="DIRECT">DIRECT</option>
+      <option value="BALANCED">BALANCED</option>
+      <option value="BULK">BULK</option>
+      <option value="HEALTH_GATED">HEALTH_GATED</option>
+    </select>
+  </div>
+  <div class="ctl"><label for="speed">speed</label>
+    <input type="range" id="speed" min="1" max="100" value="55" step="1" />
+  </div>
+  <div class="btns">
+    <button class="ghost" id="step">Step</button>
+    <button class="primary" id="run">▶ Run</button>
+    <button class="ghost" id="reset">Reset</button>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i class="sw" style="background:var(--idle)"></i>idle</span>
+  <span><i class="sw" style="background:var(--cmp)"></i>comparing</span>
+  <span><i class="sw" style="background:var(--pivot)"></i>pivot / active</span>
+  <span><i class="sw" style="background:var(--done)"></i>placed</span>
+  <span style="margin-left:8px"><i class="sw" style="background:var(--rbR)"></i>red node</span>
+  <span><i class="sw" style="background:var(--rbB)"></i>black node</span>
+</div>
+
+<div class="stage-wrap">
+  <div class="panel">
+    <div class="head"><div class="t"><span class="dot" style="background:var(--beef)"></span>Sort</div>
+      <div class="meta" id="sortmeta">compares 0 · moves 0</div></div>
+    <div class="body"><svg id="bars" preserveAspectRatio="xMidYMid meet"></svg></div>
+  </div>
+  <div class="panel">
+    <div class="head"><div class="t"><span class="dot" style="background:#8a82ff"></span>CSRBT feed</div>
+      <div class="meta"><span id="treemeta">inserts 0 · rotations 0</span> &nbsp; <span class="badge" id="rbbadge">—</span></div></div>
+    <div class="body"><svg id="tree" preserveAspectRatio="xMidYMid meet"></svg></div>
+  </div>
+</div>
+
+<div class="tuner" id="tuner">
+  <div class="thead"><b>Self-tuning selector</b>
+    <span class="muted">contextual UCB &middot; cost-model priors, refined by measured cost (compares + moves)</span>
+    <button class="ghost small" id="tune">&#9881; Auto-tune &times;200</button></div>
+  <div id="tunerbody"></div>
+</div>
+
+<div class="log" id="log"></div>
+<div class="foot">
+  Faithful to the engine: SortEvent lifecycle, the SMART <code>RuleBasedStrategySelector</code>, FeedMode personalities, and
+  <code>RedBlackTree.buildBalanced</code> (median split, deepest level red). Per-step events are the engine's deferred phase, made visible here.
+  CSRBT emits no rotation event, so rotations are shown structurally. Try <b>DIRECT</b> vs <b>BALANCED</b> feed to watch rotation count change.
+</div>
+
+<script>
+"use strict";
+(function (global) {
+  /* ============================ pure core ============================ */
+  // deterministic PRNG so a given (shape,size,seed) always replays identically
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+  const STRATS = ["insertion","merge","quick.threeway","heap","intro","jdk.timsort","counting","radix.lsd"];
+
+  function generate(shape, n, seed){
+    const rnd = mulberry32(seed);
+    const a = [];
+    if (shape === "fewDistinct"){
+      const vals = [4,9,15,21,27]; for (let i=0;i<n;i++) a.push(vals[(rnd()*vals.length)|0]);
+    } else if (shape === "reversed"){
+      for (let i=0;i<n;i++) a.push((n-i));
+    } else if (shape === "nearlySorted"){
+      for (let i=0;i<n;i++) a.push(i+1);
+      // spaced adjacent swaps: each adds ~1 inversion, so sortedness stays >= ~0.92 (lives up to the name)
+      const k = Math.max(1, Math.floor((n-1)*0.06)); const used=new Set();
+      for (let s=0;s<k;s++){ let i, tries=0; do { i = 1 + ((rnd()*(n-2))|0); tries++; } while ((used.has(i)||used.has(i-1)||used.has(i+1)) && tries<12); used.add(i); const t=a[i]; a[i]=a[i+1]; a[i+1]=t; }
+    } else { // random
+      for (let i=0;i<n;i++) a.push(1 + ((rnd()*(n*1))|0));   // small range -> dup-friendly
+    }
+    return a;
+  }
+
+  // ---- profiler (mirrors IntelligentDataProfiler's signals at viz scale) ----
+  function profile(a, intKeys){
+    const n = a.length;
+    let inOrder = 0; for (let i=1;i<n;i++) if (a[i-1] <= a[i]) inOrder++;
+    const sortedness = n <= 1 ? 1 : inOrder/(n-1);
+    const set = new Set(a); const distinct = set.size;
+    let keyStats = null;
+    if (intKeys){
+      let mn=Infinity, mx=-Infinity; for (const v of a){ if(v<mn)mn=v; if(v>mx)mx=v; }
+      const span = mx - mn;                  // KeyStats.span()
+      keyStats = { min:mn, max:mx, span, countingFeasible: mn >= 0 };
+    }
+    // coarse distribution label
+    let distribution = "UNIFORM";
+    if (distinct <= Math.max(2, n*0.25)) distribution = "CLUSTERED";
+    return {
+      size:n, sortednessRatio:sortedness, distinctEstimate:distinct, keyStats, distribution,
+      tiny:n<=16, nearlySorted: sortedness>=0.90, hasDuplicates: distinct<n
+    };
+  }
+
+  // ---- SMART selector (mirrors RuleBasedStrategySelector) ----
+  const pct = r => Math.round(r*100)+"%";
+  function select(p, policy){
+    const fb = "intro";
+    if (policy === "FIXED_INTRO") return {strategy:"intro", feed:"BULK", fallback:fb, reason:"fixed introsort"};
+    if (policy === "STABLE")      return {strategy:"merge", feed:"BULK", fallback:fb, reason:"stability requested"};
+    // SMART
+    if (p.tiny)         return {strategy:"insertion", feed:"BULK", fallback:fb, reason:"tiny input → insertion"};
+    if (p.nearlySorted) return {strategy:"jdk.timsort", feed:"BULK", fallback:fb, reason:`nearly sorted (${pct(p.sortednessRatio)}) → run-aware TimSort`};
+    if (p.keyStats){
+      const span = p.keyStats.span;
+      const counting = p.keyStats.countingFeasible && span <= Math.max(65536, 4*p.size);
+      if (counting) return {strategy:"counting", feed:"BULK", fallback:fb, reason:`bounded integer keys (range ${span+1}) → counting sort`};
+      return {strategy:"radix.lsd", feed:"BULK", fallback:fb, reason:`integer keys (~${p.distinctEstimate} distinct) → LSD radix`};
+    }
+    return {strategy:"intro", feed:"BULK", fallback:fb, reason:"general input → introsort"};
+  }
+
+  /* ---- instrumented sorts: each returns {steps, comparisons, moves} ----
+     step ops drive the bar animation but the algorithms are real. */
+  function sorter(strategy, input){
+    const a = input.slice();
+    const steps = []; let comparisons = 0, moves = 0;
+    const cmp = (i,j) => { comparisons++; steps.push({op:"cmp", i, j}); return a[i]-a[j]; };
+    const cmpVal = (i, v) => { comparisons++; steps.push({op:"cmp", i, j:i}); return a[i]-v; };
+    const swap = (i,j) => { const t=a[i]; a[i]=a[j]; a[j]=t; moves++; steps.push({op:"swap", i, j}); };
+    const setv = (i,v) => { a[i]=v; moves++; steps.push({op:"set", i, v}); };
+    const range = (lo,hi,kind) => steps.push({op:"range", lo, hi, kind:kind||"span"});
+    const pivot = (i) => steps.push({op:"pivot", i});
+    const done = (i) => steps.push({op:"done", i});
+
+    function insertion(lo,hi){
+      for (let i=lo+1;i<=hi;i++){
+        const key=a[i]; let j=i-1;
+        steps.push({op:"pivot", i});
+        while (j>=lo){ comparisons++; steps.push({op:"cmp",i:j,j:i}); if (a[j]>key){ a[j+1]=a[j]; moves++; steps.push({op:"set",i:j+1,v:a[j+1]}); j--; } else break; }
+        a[j+1]=key; moves++; steps.push({op:"set",i:j+1,v:key});
+      }
+    }
+    function siftDown(lo, i, hi){
+      // heap over a[lo..hi]
+      while (true){
+        let l=lo+2*(i-lo)+1, r=l+1, big=i;
+        if (l<=hi){ comparisons++; steps.push({op:"cmp",i:l,j:big}); if (a[l]>a[big]) big=l; }
+        if (r<=hi){ comparisons++; steps.push({op:"cmp",i:r,j:big}); if (a[r]>a[big]) big=r; }
+        if (big===i) break; swap(i,big); i=big;
+      }
+    }
+    function heap(lo,hi){
+      for (let i=lo+((hi-lo-1)>>1); i>=lo; i--) siftDown(lo,i,hi);
+      for (let end=hi; end>lo; end--){ swap(lo,end); done(end); siftDown(lo,lo,end-1); }
+      done(lo);
+    }
+    function partition3(lo,hi){
+      const p=a[ lo + ((hi-lo)>>1) ]; pivot(lo+((hi-lo)>>1));
+      let lt=lo, i=lo, gt=hi;
+      while (i<=gt){
+        comparisons++; steps.push({op:"cmp",i, j:i});
+        if (a[i]<p){ swap(i,lt); lt++; i++; }
+        else if (a[i]>p){ swap(i,gt); gt--; }
+        else i++;
+      }
+      return [lt,gt];
+    }
+    function quick(lo,hi,depth,depthLimit,fallbackHeap){
+      while (lo<hi){
+        if (hi-lo < 12){ insertion(lo,hi); return; }
+        if (fallbackHeap && depth>=depthLimit){ steps.push({op:"note",text:"intro: depth limit → heap"}); heap(lo,hi); return; }
+        range(lo,hi,"span");
+        const [lt,gt]=partition3(lo,hi);
+        if (lt-lo < hi-gt){ quick(lo,lt-1,depth+1,depthLimit,fallbackHeap); lo=gt+1; }
+        else { quick(gt+1,hi,depth+1,depthLimit,fallbackHeap); hi=lt-1; }
+        depth++;
+      }
+    }
+    function mergeSort(lo,hi){
+      if (lo>=hi) return; const mid=(lo+hi)>>1;
+      mergeSort(lo,mid); mergeSort(mid+1,hi);
+      range(lo,hi,"span");
+      const tmp=[]; let i=lo,j=mid+1;
+      while (i<=mid && j<=hi){ comparisons++; steps.push({op:"cmp",i,j}); if (a[i]<=a[j]) tmp.push(a[i++]); else tmp.push(a[j++]); }
+      while (i<=mid) tmp.push(a[i++]); while (j<=hi) tmp.push(a[j++]);
+      for (let k=0;k<tmp.length;k++) setv(lo+k, tmp[k]);
+    }
+    function timsort(lo,hi){
+      // run-aware: find ascending runs, then merge adjacent runs
+      const runs=[]; let s=lo;
+      while (s<=hi){ let e=s; while (e<hi){ comparisons++; steps.push({op:"cmp",i:e,j:e+1}); if (a[e]<=a[e+1]) e++; else break; } range(s,e,"run"); runs.push([s,e]); s=e+1; }
+      function mergeRuns(l,m,r){ range(l,r,"span"); const tmp=[]; let i=l,j=m+1; while(i<=m&&j<=r){ comparisons++; steps.push({op:"cmp",i,j}); if(a[i]<=a[j])tmp.push(a[i++]); else tmp.push(a[j++]);} while(i<=m)tmp.push(a[i++]); while(j<=r)tmp.push(a[j++]); for(let k=0;k<tmp.length;k++) setv(l+k,tmp[k]); }
+      while (runs.length>1){ const next=[]; for (let k=0;k<runs.length;k+=2){ if (k+1<runs.length){ const [l]=runs[k], [,m]=runs[k], [,r]=runs[k+1]; mergeRuns(runs[k][0], runs[k][1], runs[k+1][1]); next.push([runs[k][0], runs[k+1][1]]); } else next.push(runs[k]); } runs.length=0; runs.push(...next); }
+    }
+    function counting(lo,hi){
+      let mn=Infinity,mx=-Infinity; for(let i=lo;i<=hi;i++){ if(a[i]<mn)mn=a[i]; if(a[i]>mx)mx=a[i]; }
+      const k=mx-mn+1; const cnt=new Array(k).fill(0);
+      for(let i=lo;i<=hi;i++){ steps.push({op:"cmp",i,j:i}); cnt[a[i]-mn]++; }
+      steps.push({op:"note",text:`counting: ${k} buckets, no compares`});
+      let idx=lo; for(let v=0;v<k;v++){ while(cnt[v]-->0){ setv(idx, v+mn); done(idx); idx++; } }
+    }
+    function radix(lo,hi){
+      let mx=-Infinity; for(let i=lo;i<=hi;i++) if(a[i]>mx)mx=a[i];
+      let exp=1, passes=0;
+      while (Math.floor(mx/exp)>0){
+        passes++; steps.push({op:"note",text:`radix.lsd: pass ${passes} (digit ${exp})`});
+        const out=new Array(hi-lo+1); const cnt=new Array(10).fill(0);
+        for(let i=lo;i<=hi;i++){ steps.push({op:"cmp",i,j:i}); cnt[Math.floor(a[i]/exp)%10]++; }
+        for(let d=1;d<10;d++) cnt[d]+=cnt[d-1];
+        for(let i=hi;i>=lo;i--){ const d=Math.floor(a[i]/exp)%10; out[--cnt[d]]=a[i]; }
+        for(let i=0;i<out.length;i++) setv(lo+i, out[i]);
+        exp*=10;
+      }
+      for(let i=lo;i<=hi;i++) done(i);
+    }
+
+    const n=a.length, hi=n-1;
+    switch (strategy){
+      case "insertion": insertion(0,hi); break;
+      case "merge":     mergeSort(0,hi); break;
+      case "quick.threeway": quick(0,hi,0,1e9,false); break;
+      case "heap":      heap(0,hi); break;
+      case "intro":     quick(0,hi,0, 2*Math.max(1,Math.floor(Math.log2(n||1))), true); break;
+      case "jdk.timsort": timsort(0,hi); break;
+      case "counting":  counting(0,hi); break;
+      case "radix.lsd": radix(0,hi); break;
+      default: insertion(0,hi);
+    }
+    for (let i=0;i<n;i++) steps.push({op:"done", i});
+    return { steps, comparisons, moves, output:a };
+  }
+
+  /* ---- red-black tree (CLRS insert + faithful buildBalanced) ---- */
+  function RBTree(){
+    const NIL = { color:"B", key:null, size:0 }; NIL.left=NIL.right=NIL.parent=NIL;
+    const T = { NIL, root:NIL, n:0, rotations:0 };
+    function rotL(x){ const y=x.right; x.right=y.left; if(y.left!==NIL)y.left.parent=x; y.parent=x.parent;
+      if(x.parent===NIL)T.root=y; else if(x===x.parent.left)x.parent.left=y; else x.parent.right=y; y.left=x; x.parent=y; T.rotations++; }
+    function rotR(x){ const y=x.left; x.left=y.right; if(y.right!==NIL)y.right.parent=x; y.parent=x.parent;
+      if(x.parent===NIL)T.root=y; else if(x===x.parent.right)x.parent.right=y; else x.parent.left=y; y.right=x; x.parent=y; T.rotations++; }
+    T.insert = function(key){
+      let y=NIL, x=T.root;
+      while(x!==NIL){ y=x; if(key<x.key)x=x.left; else if(key>x.key)x=x.right; else return false; }
+      let z={key, color:"R", left:NIL, right:NIL, parent:y};
+      if(y===NIL)T.root=z; else if(key<y.key)y.left=z; else y.right=z;
+      T.n++;
+      // fixup
+      while(z.parent.color==="R"){
+        if(z.parent===z.parent.parent.left){
+          const u=z.parent.parent.right;
+          if(u.color==="R"){ z.parent.color="B"; u.color="B"; z.parent.parent.color="R"; z=z.parent.parent; }
+          else { if(z===z.parent.right){ z=z.parent; rotL(z); } z.parent.color="B"; z.parent.parent.color="R"; rotR(z.parent.parent); }
+        } else {
+          const u=z.parent.parent.left;
+          if(u.color==="R"){ z.parent.color="B"; u.color="B"; z.parent.parent.color="R"; z=z.parent.parent; }
+          else { if(z===z.parent.left){ z=z.parent; rotR(z); } z.parent.color="B"; z.parent.parent.color="R"; rotL(z.parent.parent); }
+        }
+      }
+      T.root.color="B"; return true;
+    };
+    // faithful to RedBlackTree.buildBalanced: median split, deepest level red, root black
+    T.buildBalanced = function(asc){
+      const n=asc.length; T.n=n; if(n===0){ T.root=NIL; return; }
+      const maxDepth = 31 - Math.clz32(n);
+      function build(lo,hi,depth,parent){
+        if(lo>hi) return NIL;
+        const mid=(lo+hi)>>>1;
+        const node={key:asc[mid], color:(depth===maxDepth?"R":"B"), left:NIL,right:NIL,parent};
+        node.left=build(lo,mid-1,depth+1,node);
+        node.right=build(mid+1,hi,depth+1,node);
+        return node;
+      }
+      T.root=build(0,n-1,0,NIL); T.root.parent=NIL; T.root.color="B";
+    };
+    return T;
+  }
+  function validateRB(T){
+    const NIL=T.NIL; const issues=[];
+    if (T.root!==NIL && T.root.color!=="B") issues.push("root not black");
+    // BST + no red-red + uniform black-height
+    let bh=-1, prev=null, ok=true;
+    function walk(x, blacks){
+      if(x===NIL){ if(bh<0)bh=blacks; else if(bh!==blacks){ ok=false; issues.push("black-height mismatch"); } return; }
+      if(x.color==="R" && (x.left.color==="R"||x.right.color==="R")) issues.push("red node with red child");
+      walk(x.left, blacks+(x.color==="B"?1:0));
+      if(prev!==null && prev>=x.key) issues.push("BST order broken");
+      prev=x.key;
+      walk(x.right, blacks+(x.color==="B"?1:0));
+    }
+    walk(T.root,0);
+    return { valid: issues.length===0, blackHeight: bh, issues:[...new Set(issues)] };
+  }
+
+  // feeding order for each FeedMode personality
+  function feedOrder(sortedDistinct, mode){
+    if (mode==="DIRECT") return sortedDistinct.slice();
+    // BALANCED / HEALTH_GATED: median-first (pre-order over the sorted run) → minimal rotations
+    const out=[];
+    (function pre(lo,hi){ if(lo>hi)return; const mid=(lo+hi)>>>1; out.push(sortedDistinct[mid]); pre(lo,mid-1); pre(mid+1,hi); })(0, sortedDistinct.length-1);
+    return out;
+  }
+
+  // Build the full feed timeline for the chosen mode. Returns {steps, tree, rotations, inserts, repairs}
+  function feeder(sortedDistinct, mode){
+    const steps=[]; const T=RBTree();
+    if (mode==="BULK"){
+      T.buildBalanced(sortedDistinct);
+      steps.push({op:"bulk"}); // reveal whole tree at once (O(n) build, no rotations)
+      return { steps, tree:T, rotations:0, inserts:sortedDistinct.length, repairs:0 };
+    }
+    const order = feedOrder(sortedDistinct, mode);
+    let repairs=0; const batch = Math.max(4, Math.round(sortedDistinct.length/4));
+    order.forEach((k,idx) => {
+      const before=T.rotations; T.insert(k);
+      steps.push({op:"insert", key:k, rotated:(T.rotations-before)});
+      if (mode==="HEALTH_GATED" && (idx+1)%batch===0 && idx+1<order.length){ repairs++; steps.push({op:"repair", healthy:true}); }
+    });
+    return { steps, tree:T, rotations:T.rotations, inserts:order.length, repairs };
+  }
+
+  /* ---- one full job: the object the UI animates and the test checks ---- */
+  function buildJob(opts){
+    const { shape, size, intKeys, policy, stratOverride, feedOverride, seed } = opts;
+    const input = generate(shape, size, seed==null?12345:seed);
+    const p = profile(input, intKeys);
+    const plan = select(p, policy);
+    const strategy = (stratOverride && stratOverride!=="auto") ? stratOverride : plan.strategy;
+    const sort = sorter(strategy, input);
+    const sortedDistinct = [...new Set(sort.output)].sort((x,y)=>x-y);
+    const feedMode = (feedOverride && feedOverride!=="auto") ? feedOverride : plan.feed;
+    const feed = feeder(sortedDistinct, feedMode);
+    const rb = validateRB(feed.tree);
+    return { input, profile:p, plan, strategy, feedMode, sort, sortedDistinct, feed, rb };
+  }
+
+  /* ---- headless self-test: sorts correct + RB always valid ---- */
+  function selfTest(trials){
+    trials = trials||120; const shapes=["random","nearlySorted","reversed","fewDistinct"];
+    const feeds=["DIRECT","BALANCED","BULK","HEALTH_GATED"];
+    let checked=0; const fails=[];
+    for (let t=0;t<trials;t++){
+      const shape=shapes[t%shapes.length];
+      const size=8+((t*7)%49);
+      const intKeys = (t%2===0);
+      for (const strat of STRATS){
+        const job=buildJob({shape,size,intKeys,policy:"SMART",stratOverride:strat,feedOverride:"BULK",seed:1000+t});
+        const want=job.input.slice().sort((a,b)=>a-b);
+        const got=job.sort.output;
+        const sortedOk = got.length===want.length && got.every((v,i)=>v===want[i]);
+        if(!sortedOk) fails.push(`sort ${strat} ${shape} n=${size}`);
+        checked++;
+      }
+      for (const fm of feeds){
+        const job=buildJob({shape,size,intKeys,policy:"SMART",stratOverride:"auto",feedOverride:fm,seed:5000+t});
+        if(!job.rb.valid) fails.push(`RB invalid feed=${fm} ${shape} n=${size}: ${job.rb.issues.join("|")}`);
+        // in-order of the tree must equal the sorted distinct run
+        const ord=[]; (function io(x){ if(x===job.feed.tree.NIL)return; io(x.left); ord.push(x.key); io(x.right); })(job.feed.tree.root);
+        const eq = ord.length===job.sortedDistinct.length && ord.every((v,i)=>v===job.sortedDistinct[i]);
+        if(!eq) fails.push(`feed order mismatch feed=${fm} ${shape} n=${size}`);
+        checked++;
+      }
+    }
+    return { ok: fails.length===0, checked, fails: fails.slice(0,20), totalFails:fails.length };
+  }
+
+  /* ---- self-tuning selector: a JS port of BanditStrategySelector ---- */
+  function Bandit(opts){
+    opts = opts || {};
+    const explore = opts.explore != null ? opts.explore : 0.7;
+    const table = new Map(); // ctxKey -> Map(armId -> {pulls, mean, prior})
+    const ctxKey = p => {
+      const size = p.size<=16?"tiny":p.size<=1024?"small":p.size<=100000?"medium":"large";
+      const s = p.sortednessRatio, sort = s>=0.90?"near":s>=0.60?"part":"rand";
+      return size+"|"+sort+"|"+(p.keyStats?"int":"cmp")+"|"+p.distribution;
+    };
+    const arms = p => {
+      const a = ["intro","quick.threeway","jdk.timsort","merge","heap"];
+      if (p.size<=1024) a.push("insertion");                 // never explore O(n^2) on big inputs
+      if (p.keyStats){ a.push("radix.lsd"); const span=p.keyStats.span;
+        if (p.keyStats.countingFeasible && span>=0 && span<=Math.max(65536,4*p.size)) a.push("counting"); }
+      return a;
+    };
+    const prior = (id,p) => {                                // analytical priors (mirror the cost model)
+      const n=Math.max(1,p.size), log2n=Math.log(n)/Math.LN2, s=p.sortednessRatio;
+      switch(id){
+        case "counting": { const range=p.keyStats?(p.keyStats.span+1):n; return n+Math.max(1,range); }
+        case "radix.lsd": return 8*n;
+        case "insertion": return n+(1-s)*n*n*0.25;
+        case "jdk.timsort": { const runs=Math.max(1,Math.round((1-s)*(n-1))+1); return 1.3*n*(Math.log(runs)/Math.LN2+1); }
+        case "heap": return 1.6*n*log2n;
+        case "merge": return 1.1*n*log2n;
+        case "quick.threeway": return n*log2n;
+        default: return 1.05*n*log2n;
+      }
+    };
+    const ctxArms = p => {
+      const key=ctxKey(p); let m=table.get(key); if(!m){ m=new Map(); table.set(key,m); }
+      for(const id of arms(p)) if(!m.has(id)){ const pr=prior(id,p); m.set(id,{pulls:1, mean:pr, prior:pr}); }
+      return m;
+    };
+    function select(p){                                      // UCB on relative cost: argmin(mean/best - c*sqrt(lnN/pulls))
+      const A=arms(p), m=ctxArms(p); let N=0, best=Infinity;
+      for(const id of A){ const a=m.get(id); N+=a.pulls; best=Math.min(best,a.mean); }
+      const lnN=Math.log(Math.max(2,N)), denom=best+1; let pick=A[0], bs=Infinity;
+      for(const id of A){ const a=m.get(id); const score=(a.mean+1)/denom - explore*Math.sqrt(lnN/a.pulls); if(score<bs){ bs=score; pick=id; } }
+      return pick;
+    }
+    function observe(p,id,cost){ const m=ctxArms(p); let a=m.get(id); if(!a){ const pr=prior(id,p); a={pulls:1,mean:pr,prior:pr}; m.set(id,a); } a.pulls++; a.mean += (cost-a.mean)/a.pulls; }
+    function snapshot(p){ const A=arms(p), m=ctxArms(p); return { context:ctxKey(p), pick:select(p), arms:A.map(id=>{ const a=m.get(id); return {id, mean:a.mean, prior:a.prior, pulls:a.pulls}; }) }; }
+    return { select, observe, snapshot, contextKey:ctxKey };
+  }
+
+  // Run n headless jobs of one shape through the bandit, learning from real measured cost (compares+moves).
+  function tuneDemo(bandit, shape, size, intKeys, n, seed0){
+    seed0 = seed0 || 9000;
+    for(let i=0;i<n;i++){
+      const input=generate(shape,size,seed0+i), p=profile(input,intKeys), id=bandit.select(p);
+      const res=sorter(id,input); bandit.observe(p,id, res.comparisons+res.moves);
+    }
+    return bandit.snapshot(profile(generate(shape,size,seed0),intKeys));
+  }
+
+  const SBSViz = { mulberry32, generate, profile, select, sorter, RBTree, validateRB, feedOrder, feeder, buildJob, selfTest, STRATS, Bandit, tuneDemo };
+  global.SBSViz = SBSViz;
+
+  /* ============================ DOM layer ============================ */
+  if (typeof document === "undefined") return;   // headless: stop here
+
+  const $ = id => document.getElementById(id);
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs) => { const n=document.createElementNS(SVGNS, tag); for(const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+
+  const ui = {
+    shape:$("shape"), size:$("size"), sizeval:$("sizeval"), intkeys:$("intkeys"), policy:$("policy"),
+    strat:$("strat"), feed:$("feed"), speed:$("speed"),
+    run:$("run"), step:$("step"), reset:$("reset"),
+    bars:$("bars"), tree:$("tree"), log:$("log"), sortmeta:$("sortmeta"), treemeta:$("treemeta"), rbbadge:$("rbbadge"),
+    stProfile:$("st-profile"), stSelect:$("st-select"), stSort:$("st-sort"), stFeed:$("st-feed"),
+    tune:$("tune"), tunerbody:$("tunerbody"),
+  };
+
+  let job=null, timeline=[], tlIdx=0, playing=false, timer=null;
+  let bars=[], barState=[], cmpC=0, moveC=0;
+  let liveTree=null, insC=0, rotC=0;
+  const bandit = SBSViz.Bandit();
+
+  function stageActive(name){
+    document.querySelectorAll(".stage").forEach(s=>s.classList.toggle("active", s.dataset.stage===name));
+  }
+  function logEv(cls, tag, msg){
+    const row=document.createElement("div"); row.className="row "+cls;
+    const t=document.createElement("span"); t.className="tag"; t.textContent=tag;
+    const m=document.createElement("span"); m.className="msg"; m.textContent=msg;
+    row.append(t,m); ui.log.append(row); ui.log.scrollTop=ui.log.scrollHeight;
+  }
+
+  function speedDelay(){ const v=+ui.speed.value; return Math.round(4 + (101-v)*4.0); } // ms per step
+
+  /* ---------- bars ---------- */
+  function layoutBars(){
+    const svg=ui.bars; svg.innerHTML="";
+    const n=barState.length; const W=1000, H=340, pad=10;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const bw=(W-2*pad)/n, gap=Math.min(3, bw*0.18);
+    const mx=Math.max(...barState.map(b=>b.v), 1);
+    bars=[];
+    for(let i=0;i<n;i++){
+      const h=(H-30)*(barState[i].v/mx);
+      const r=el("rect",{x:pad+i*bw+gap/2, y:H-20-h, width:bw-gap, height:h, rx:2, class:"bar", fill:"var(--idle)"});
+      svg.append(r);
+      if (n<=40){ const tx=el("text",{x:pad+i*bw+bw/2, y:H-7, class:"blabel"}); tx.textContent=barState[i].v; svg.append(tx); }
+      bars.push(r);
+    }
+  }
+  function paintBar(i){
+    if(i<0||i>=bars.length) return;
+    const st=barState[i].s;
+    bars[i].setAttribute("fill", st==="cmp"?"var(--cmp)":st==="pivot"?"var(--pivot)":st==="done"?"var(--done)":"var(--idle)");
+  }
+  function clearTransient(){ for(let i=0;i<barState.length;i++){ if(barState[i].s==="cmp"||barState[i].s==="pivot"){ barState[i].s=barState[i].done?"done":"idle"; paintBar(i);} } }
+  function setBarVal(i,v){ barState[i].v=v; const mx=Math.max(...barState.map(b=>b.v),1); const H=340; const n=barState.length; const W=1000,pad=10; const bw=(W-2*pad)/n; const h=(H-30)*(v/mx); bars[i].setAttribute("y",H-20-h); bars[i].setAttribute("height",h);
+    const lbl=ui.bars.querySelectorAll("text.blabel")[i]; if(lbl) lbl.textContent=v; }
+
+  function applySortStep(s){
+    clearTransient();
+    if(s.op==="cmp"){ barState[s.i].s="cmp"; if(s.j!=null)barState[s.j].s="cmp"; paintBar(s.i); paintBar(s.j); cmpC++; }
+    else if(s.op==="swap"){ const t=barState[s.i].v; setBarVal(s.i, barState[s.j].v); setBarVal(s.j, t); barState[s.i].s=barState[s.j].s="pivot"; paintBar(s.i); paintBar(s.j); moveC++; }
+    else if(s.op==="set"){ setBarVal(s.i, s.v); barState[s.i].s="pivot"; paintBar(s.i); moveC++; }
+    else if(s.op==="pivot"){ barState[s.i].s="pivot"; paintBar(s.i); }
+    else if(s.op==="done"){ barState[s.i].done=true; barState[s.i].s="done"; paintBar(s.i); }
+    else if(s.op==="range" || s.op==="note"){ /* structural hint only */ }
+    ui.sortmeta.textContent=`compares ${cmpC} · moves ${moveC}`;
+    if(s.op==="note") logEv("ev-sort","[SORT·step]", s.text);
+  }
+
+  /* ---------- tree ---------- */
+  function renderTree(flashKey, justInsKey){
+    const svg=ui.tree; const NIL=liveTree.NIL;
+    // in-order x positions + depth y
+    const nodes=[]; let idx=0; let maxDepth=0;
+    (function io(x,d){ if(x===NIL)return; io(x.left,d+1); x._x=idx++; x._d=d; if(d>maxDepth)maxDepth=d; nodes.push(x); io(x.right,d+1); })(liveTree.root,0);
+    const W=1000, H=340, padX=24, padY=30;
+    svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.innerHTML="";
+    const n=Math.max(nodes.length,1);
+    const dx=(W-2*padX)/Math.max(n,1);
+    const dy=Math.min(58, (H-2*padY)/Math.max(maxDepth+1,1));
+    const X=x=> padX + dx*(x._x+0.5);
+    const Y=x=> padY + dy*x._d;
+    // edges first
+    for(const x of nodes){
+      for(const c of [x.left,x.right]) if(c!==NIL){ svg.append(el("line",{x1:X(x),y1:Y(x),x2:X(c),y2:Y(c),class:"rb-edge"})); }
+    }
+    const r=Math.max(9, Math.min(16, dx*0.42));
+    for(const x of nodes){
+      const g=el("g",{class:"node "+(x.color==="R"?"red":"black")+(x.key===flashKey?" flash":"")+(x.key===justInsKey?" justins":""), transform:`translate(${X(x)},${Y(x)})`});
+      g.append(el("circle",{r}));
+      const t=el("text",{}); t.textContent=x.key; g.append(t);
+      svg.append(g);
+    }
+    ui.treemeta.textContent=`inserts ${insC} · rotations ${rotC}`;
+  }
+
+  function applyFeedStep(s){
+    if(s.op==="bulk"){
+      liveTree=job.feed.tree;  // already built
+      insC=job.feed.inserts; rotC=0;
+      renderTree();
+      logEv("ev-feed","[FEED·bulk]", `O(n) buildBalanced → ${insC} keys placed, 0 rotations (median split, deepest level red)`);
+    } else if(s.op==="insert"){
+      liveTree.insert(s.key); insC++; rotC+=s.rotated;
+      renderTree(null, s.key);
+      if(s.rotated>0) logEv("ev-feed","[FEED·insert]", `add(${s.key}) → ${s.rotated} rotation${s.rotated>1?"s":""}`);
+    } else if(s.op==="repair"){
+      logEv("ev-feed","[TreeEvent.Repair]", `selfRepair() → healthy=${s.healthy}`);
+      flashAll();
+    }
+  }
+  function flashAll(){ ui.tree.querySelectorAll("g.node").forEach(g=>{ g.classList.add("flash"); setTimeout(()=>g.classList.remove("flash"),260); }); }
+
+  /* ---------- build the timeline from a job ---------- */
+  function renderBandit(profile){
+    const snap=bandit.snapshot(profile);
+    const maxMean=Math.max.apply(null, snap.arms.map(a=>a.mean).concat(1));
+    const rows=snap.arms.map(a=>{
+      const w=Math.max(3, Math.round(100*a.mean/maxMean)), pick=a.id===snap.pick;
+      return `<div class="trow${pick?' pick':''}"><span class="tname">${pick?'▶ ':''}${a.id}</span>`
+        +`<span class="tbarwrap"><span class="tbar" style="width:${w}%"></span></span>`
+        +`<span class="tmean">${Math.round(a.mean).toLocaleString()}</span>`
+        +`<span class="tpulls">${a.pulls>1?a.pulls+'×':'prior'}</span></div>`;
+    }).join("");
+    ui.tunerbody.innerHTML=`<div class="tctx">context <code>${snap.context}</code> &mdash; bandit would run <b>${snap.pick}</b></div>${rows}`;
+  }
+
+  function compile(){
+    const policy=ui.policy.value, shape=ui.shape.value, size=+ui.size.value, intKeys=ui.intkeys.checked;
+    let stratOverride=ui.strat.value, banditReason=null;
+    if(policy==="BANDIT" && stratOverride==="auto"){
+      const pp=SBSViz.profile(SBSViz.generate(shape,size,12345), intKeys);
+      stratOverride=bandit.select(pp);
+      const arm=bandit.snapshot(pp).arms.find(a=>a.id===stratOverride);
+      banditReason=`self-tuning bandit → ${stratOverride} (${arm.pulls>1?arm.pulls+" pulls observed":"on prior, not yet tuned"})`;
+    }
+    const o={ shape, size, intKeys, policy: policy==="BANDIT"?"SMART":policy, stratOverride, feedOverride:ui.feed.value, seed:12345 };
+    job=buildJob(o);
+    // reset visuals
+    barState=job.input.map(v=>({v, s:"idle", done:false})); cmpC=0; moveC=0; layoutBars();
+    liveTree=RBTree(); insC=0; rotC=0; renderTree(); ui.rbbadge.textContent="—"; ui.rbbadge.className="badge";
+    ui.sortmeta.textContent="compares 0 · moves 0"; ui.treemeta.textContent="inserts 0 · rotations 0";
+
+    const tl=[];
+    tl.push({k:"life", t:"JOB_STARTED", d:`${o.shape}, n=${job.input.length}${o.intKeys?", +keyEncoder":""}`});
+    const p=job.profile;
+    tl.push({k:"life", t:"PROFILED", stage:"profile",
+      d:`sortedness ${pct(p.sortednessRatio)}, ~${p.distinctEstimate} distinct${p.keyStats?`, keys [${p.keyStats.min}..${p.keyStats.max}]`:""}, ${p.distribution.toLowerCase()}`});
+    tl.push({k:"life", t:"PLAN_SELECTED", stage:"select",
+      d:`${job.strategy}  ·  feed ${job.feedMode}  —  ${banditReason||job.plan.reason}${(!banditReason&&ui.strat.value!=="auto"&&ui.strat.value!==job.plan.strategy)?" (manual override)":""}`});
+    tl.push({k:"life", t:"SORT·begin", stage:"sort", d:`strategy ${job.strategy}`});
+    for(const s of job.sort.steps) tl.push({k:"sort", s});
+    tl.push({k:"life", t:"SORT_COMPLETED", stage:"sort", d:`${job.sort.comparisons} compares, ${job.sort.moves} moves → ${job.sortedDistinct.length} distinct keys`});
+    tl.push({k:"life", t:"FEED_STARTED", stage:"feed", d:`mode ${job.feedMode} → CSRBT OrderedSet`});
+    for(const s of job.feed.steps) tl.push({k:"feed", s});
+    tl.push({k:"validate"});
+    tl.push({k:"life", t:"FEED_COMPLETED", stage:"feed", d:`${job.feed.inserts} keys, ${job.feed.rotations} rotations${job.feed.repairs?`, ${job.feed.repairs} repairs`:""}`});
+    tl.push({k:"life", t:"JOB_COMPLETED", stage:null, d:`done`});
+    timeline=tl; tlIdx=0;
+
+    // pipeline header summary (static preview)
+    ui.stProfile.innerHTML=`${pct(p.sortednessRatio)} sorted<br><small>${p.distinctEstimate} distinct · ${p.distribution.toLowerCase()}</small>`;
+    ui.stSelect.innerHTML=`${job.strategy}<br><small>${banditReason||job.plan.reason}</small>`;
+    ui.stSort.innerHTML=`—<br><small>pending</small>`;
+    ui.stFeed.innerHTML=`${job.feedMode}<br><small>pending</small>`;
+    renderBandit(job.profile);
+  }
+
+  function advance(){
+    if(tlIdx>=timeline.length){ stop(); stageActive(null); ui.run.textContent="▶ Run"; return false; }
+    const item=timeline[tlIdx++];
+    if(item.k==="life"){
+      if(item.stage!==undefined) stageActive(item.stage);
+      const cls = item.t.startsWith("SORT")?"ev-sort": item.t.startsWith("FEED")?"ev-feed":"ev-life";
+      logEv(cls, `[${item.t}]`, item.d);
+      if(item.t==="SORT_COMPLETED") ui.stSort.innerHTML=`${job.sort.comparisons} cmp · ${job.sort.moves} mv<br><small>${job.strategy}</small>`;
+      if(item.t==="FEED_COMPLETED") ui.stFeed.innerHTML=`${job.feedMode}<br><small>${job.feed.inserts} keys · ${job.feed.rotations} rot</small>`;
+      if(item.t==="JOB_COMPLETED" && ui.policy.value==="BANDIT"){ bandit.observe(job.profile, job.strategy, job.sort.comparisons+job.sort.moves); logEv("ev-life","[autotune]", `observed ${job.strategy} cost ${job.sort.comparisons+job.sort.moves} → bandit updated`); renderBandit(job.profile); }
+    } else if(item.k==="sort"){ stageActive("sort"); applySortStep(item.s); }
+    else if(item.k==="feed"){ stageActive("feed"); applyFeedStep(item.s); }
+    else if(item.k==="validate"){
+      const rb=validateRB(liveTree);
+      ui.rbbadge.textContent = rb.valid?`✓ valid RB · bh=${rb.blackHeight}`:`✗ ${rb.issues[0]}`;
+      ui.rbbadge.className = "badge "+(rb.valid?"ok":"bad");
+      logEv(rb.valid?"ev-feed":"ev-err", "[StrategyHealthCheck]", rb.valid?`red-black invariants hold · black-height ${rb.blackHeight}`:`INVALID: ${rb.issues.join(", ")}`);
+    }
+    return true;
+  }
+
+  function tick(){ if(!playing) return; const more=advance(); if(!more){ return; } timer=setTimeout(tick, speedDelay()); }
+  function play(){ if(!timeline.length) compile(); playing=true; ui.run.textContent="⏸ Pause"; tick(); }
+  function stop(){ playing=false; if(timer) clearTimeout(timer); timer=null; }
+  function reset(){ stop(); ui.run.textContent="▶ Run"; compile(); ui.log.innerHTML=""; stageActive(null); }
+
+  ui.run.addEventListener("click", ()=>{ if(playing){ stop(); ui.run.textContent="▶ Run"; } else play(); });
+  ui.step.addEventListener("click", ()=>{ stop(); ui.run.textContent="▶ Run"; if(!timeline.length) compile(); advance(); });
+  ui.reset.addEventListener("click", reset);
+  ui.size.addEventListener("input", ()=>{ ui.sizeval.textContent=ui.size.value; reset(); });
+  for(const c of [ui.shape, ui.intkeys, ui.policy, ui.strat, ui.feed]) c.addEventListener("change", reset);
+  ui.tune.addEventListener("click", ()=>{
+    const snap=SBSViz.tuneDemo(bandit, ui.shape.value, +ui.size.value, ui.intkeys.checked, 200);
+    logEv("ev-life","[autotune ×200]", `context ${snap.context} → bandit now prefers ${snap.pick}`);
+    renderBandit(SBSViz.profile(SBSViz.generate(ui.shape.value,+ui.size.value,12345), ui.intkeys.checked));
+  });
+
+  // boot
+  reset();
+  // surface a quick self-check in the console for the curious
+  try { const r=SBSViz.selfTest(40); console.log("SBSViz selfTest:", r.ok?`OK (${r.checked} checks)`:`FAIL`, r.ok?"":r.fails); } catch(e){ console.warn(e); }
+
+})(typeof globalThis!=="undefined"?globalThis:this);
+</script>
+</body>
+</html>

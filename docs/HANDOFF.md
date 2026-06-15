@@ -155,8 +155,9 @@ Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedS
 - `nearlySorted` uses the adjacent-pair ratio, not total inversions. It now routes to run-aware
   TimSort (O(n log n) worst case), so a "locally sorted" input with distant inversions no longer blows
   up the way plain insertion did (the demo surfaced 16M moves before this fix). The profiler now
-  measures `longestRun` (the longest ascending run, on `DataProfile`); wiring it into selection and a
-  true inversion count are still open.
+  measures `longestRun` (the longest ascending run, on `DataProfile`), and the rule-based selector
+  routes a long single run (>= 50% of n) to TimSort even when adjacency is below 90%; factoring it into
+  the cost-model/bandit and a true inversion count are still open.
 - Parallel/streaming/external sort not implemented.
 
 ## Next steps (roadmap)

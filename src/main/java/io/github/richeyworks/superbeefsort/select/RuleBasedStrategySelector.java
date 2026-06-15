@@ -36,12 +36,13 @@ public final class RuleBasedStrategySelector implements StrategySelector {
         if (p.tiny()) {
             return new SortPlan(SortingNetworkStrategy.ID, FeedMode.BULK, fallback, "tiny input -> sorting network");
         }
-        if (p.nearlySorted()) {
-            // Adjacency sortedness is high, but a few far-displaced elements can still mean many
-            // total inversions, where plain insertion (O(n + inversions)) blows up. TimSort is
-            // run-aware AND O(n log n) worst case, so it stays fast in both shapes.
+        if (p.nearlySorted() || p.longestRunRatio() >= 0.5) {
+            // Run-aware: high adjacency OR a single run covering half the input both favor TimSort,
+            // whose run-merging exploits existing order and stays O(n log n) worst case. longestRun
+            // catches "mostly one sorted block" inputs that the adjacency ratio alone misses.
             return new SortPlan(JdkSortStrategy.ID, FeedMode.BULK, fallback,
-                    "nearly sorted (" + pct(p.sortednessRatio()) + ") -> run-aware TimSort");
+                    "run-aware (adjacency " + pct(p.sortednessRatio()) + ", longest run "
+                            + pct(p.longestRunRatio()) + ") -> TimSort");
         }
         KeyStats ks = p.keyStats();
         if (ks != null) {

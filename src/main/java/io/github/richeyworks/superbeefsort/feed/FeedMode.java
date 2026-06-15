@@ -11,5 +11,11 @@ public enum FeedMode {
     /** Balanced insertion in batches, validating/repairing tree health between batches. */
     HEALTH_GATED,
     /** Median-first insertion that validates CSRBT health after every insert; explicit duplicate accounting. */
-    PRECISION
+    PRECISION,
+    /**
+     * Median-first insertion aimed at an {@link io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet}
+     * built with {@code parallelFanOut()}: each {@code add} fans out to all mirror members concurrently
+     * (ADR-003 E5), so the per-member builds overlap with no SuperBeefSort-side threads.
+     */
+    PARALLEL
 }

@@ -14,6 +14,56 @@ concurrency argument, the fallback, and a test plan — so the implementation se
 
 ---
 
+## 0. CORRECTION — verified against CSRBT (2026-06-15, build env now live)
+
+**The premise of §2–§4 below is wrong, caught by actually reading `EnsembleOrderedSet`.** It is **not**
+range-partitioned. It is an **N-version replication ensemble** (ADR-003): every member holds an *exact
+mirror* of the full set for fault tolerance; reads are served by a fixed `primary`; writes fan out to
+*all* members through a `MemberExecutor` (sequential by default, parallel via `Builder.parallelFanOut()`).
+There are no key-range shards — so "slice the sorted run by member range" does not apply. (This is exactly
+what §9's checklist item #1 said to verify first; it's false.)
+
+**Corrected design — parallel *mirror* bulk-build.** The real CSRBT-native win is to build every member's
+tree from the sorted run **concurrently**, each in O(n) via `OrderedSet.buildFromSorted`, fanned out
+through the ensemble's existing `MemberExecutor`:
+
+```java
+// new on EnsembleOrderedSet<K>, reusing the ADR-003 E5 fan-out machinery:
+public void buildAllFromSorted(List<K> ascendingDistinct) {
+    synchronized (writeLock) {                       // same lock the write path uses
+        if (!isEmpty()) throw new IllegalStateException("buildAllFromSorted requires an empty ensemble");
+        var recipients = members.stream().filter(EnsembleMember::isActive).toList();
+        executor.apply(recipients, m -> {            // parallel across members when parallelFanOut()
+            if (m.isStrategyBacked()) m.orderedSet().buildFromSorted(ascendingDistinct); // O(n)
+            else ascendingDistinct.forEach(m.set()::add);                                // engine-tier fallback
+            return true;
+        });
+        recipients.forEach(m -> m.setExact(true));   // all built identically -> all exact mirrors
+    }
+}
+```
+
+Wall-clock ≈ one member's O(n) `buildFromSorted` (the rest run concurrently), versus today's path where
+`CsrbtTarget.of(ensemble)` exposes only `add(K)`, so `BalancedBuildFeeder` does ~n median-first `add`s,
+each fanned out to all members — O(members · n log n) of work serialized through the per-`add` fan-out.
+SBS side: `CsrbtTarget` gains `supportsEnsembleBulkBuild()` / `ensembleBulkBuild(run)`; a `FeedMode.PARALLEL`
+feeder calls it when all members are empty + strategy-backed, else falls back to `BalancedBuildFeeder`.
+
+**Open decisions for the CSRBT author (Richmond) — these are why I stopped before editing the ensemble:**
+- Bypass the normal write path with a dedicated `buildAllFromSorted`, or route a bulk build through the
+  existing `add`/`fanOutWrite` so it inherits ADR-003 semantics for free?
+- Which ensemble modes must it honor? The sketch assumes `MIRROR`; `SAMPLED_SHADOW` / `REBUILD_SHADOW`
+  intentionally keep shadows inexact, and a wholesale bulk-build would override that.
+- Cadence/observability the per-write path runs (`writeOps`, `verifyEvery`, `rebuildEvery`, `TreeEvent`
+  emission, `checkMemoryCeiling`) — skip for a one-shot empty-ensemble build, or fire?
+- Failure semantics: reuse the quarantine/failover rule, or fail-fast (clean, since the ensemble was empty)?
+
+**Status of the environment:** the sandbox now has a working JDK 17 + a CSRBT checkout, and
+`./gradlew build` is green (61 tests, 0 failures) — so the corrected design can be implemented and tested
+here directly. §2–§4 are retained below as the record of the original (range-partitioned) assumption.
+
+---
+
 ## 1. Requirements
 
 **Functional**

@@ -243,8 +243,11 @@
 <div class="recbar" id="recbar">
   <span class="reclbl">recording</span>
   <input id="rectoken" class="rectoken" spellcheck="false" />
-  <button class="ghost small" id="reccopy">Copy</button>
-  <button class="ghost small" id="recreplay">Replay</button>
+  <button class="ghost small" id="reccopy" title="Copy the compact token (reproduces this run from its seed)">Copy</button>
+  <button class="ghost small" id="recreplay" title="Reproduce the run encoded in the token box">Replay</button>
+  <button class="ghost small" id="recsave" title="Download a self-contained capture: events + profile + plan + digest">⤓ Save</button>
+  <button class="ghost small" id="recload" title="Load a saved capture file and replay the recorded run">⤒ Load</button>
+  <input type="file" id="recloadfile" accept="application/json,.json" hidden />
   <span class="recstatus" id="recstatus"></span>
 </div>
 
@@ -660,6 +663,60 @@
   function encodeRun(rec){ return "SBS1." + btoa(JSON.stringify(rec)); }
   function decodeRun(token){ return JSON.parse(atob(String(token).trim().replace(/^SBS1\./,""))); }
 
+  /* ---- self-contained capture (v2): the full event stream, not just the config ----
+     The token above reproduces a run by re-executing from the seed; a capture instead stores the
+     actual {profile, plan, sort+feed events, digest}, so it replays the *recorded* run verbatim — a
+     portable teaching / bug-repro artifact that still shows the original animation even if the engine
+     code later changes. */
+  function captureOf(job, config, selectReason){
+    return { v:2, kind:"sbs-capture", created:Date.now(),
+      config:{ shape:config.shape, size:config.size, intKeys:!!config.intKeys,
+        policy:config.policy||"SMART", strat:job.strategy, feed:config.feed||"auto",
+        seed:config.seed==null?12345:config.seed },
+      selectReason: selectReason || job.plan.reason,
+      input: job.input.slice(), profile: job.profile, plan: job.plan,
+      strategy: job.strategy, feedMode: job.feedMode, sortedDistinct: job.sortedDistinct.slice(),
+      sort:{ comparisons:job.sort.comparisons, moves:job.sort.moves, steps:job.sort.steps },
+      feed:{ inserts:job.feed.inserts, rotations:job.feed.rotations, repairs:job.feed.repairs, steps:job.feed.steps },
+      digest: digestOf(job) };
+  }
+  // Reconstruct a job-shaped object purely from a capture's stored events: rebuild the tree by replaying
+  // them (bulk -> buildBalanced over the stored run; else insert the recorded keys in their recorded order).
+  function rebuildFromCapture(cap){
+    const T = RBTree();
+    if (cap.feed.steps.some(s=>s.op==="bulk")) T.buildBalanced(cap.sortedDistinct);
+    else for (const s of cap.feed.steps) if (s.op==="insert") T.insert(s.key);
+    return { input:cap.input.slice(), profile:cap.profile, plan:cap.plan,
+      strategy:cap.strategy, feedMode:cap.feedMode,
+      sort:{ comparisons:cap.sort.comparisons, moves:cap.sort.moves, steps:cap.sort.steps,
+        output:cap.input.slice().sort((a,b)=>a-b) },
+      sortedDistinct:cap.sortedDistinct.slice(),
+      feed:{ steps:cap.feed.steps, tree:T, rotations:cap.feed.rotations, inserts:cap.feed.inserts, repairs:cap.feed.repairs },
+      rb: validateRB(T) };
+  }
+  // Verification hook: the digest implied by a capture's stored events alone (no seed, no engine paths).
+  function replayDigestFromCapture(cap){ return digestOf(rebuildFromCapture(cap)); }
+  function encodeCapture(cap){ return JSON.stringify(cap); }
+  function decodeCapture(text){ const c=JSON.parse(text); if(!c||c.kind!=="sbs-capture") throw new Error("not an SBS capture"); return c; }
+
+  /* ---- headless test: a capture round-trips (JSON) to the same digest as a fresh run ---- */
+  function captureRoundtripTest(trials){
+    trials=trials||80; const shapes=["random","nearlySorted","reversed","fewDistinct"];
+    const feeds=["DIRECT","BALANCED","BULK","HEALTH_GATED"]; const fails=[]; let checked=0;
+    for(let t=0;t<trials;t++){
+      const shape=shapes[t%shapes.length], size=8+((t*5)%49), intKeys=(t%2===0);
+      const strat=STRATS[t%STRATS.length], feed=feeds[t%feeds.length], seed=7000+t;
+      const job=buildJob({ shape, size, intKeys, policy:"SMART", stratOverride:strat, feedOverride:feed, seed });
+      const cap=decodeCapture(encodeCapture(captureOf(job, { shape, size, intKeys, policy:"SMART", feed, seed })));
+      if(!digestEquals(replayDigestFromCapture(cap), cap.digest)) fails.push(`event-replay ${strat}/${feed} ${shape} n=${size}`);
+      if(!digestEquals(cap.digest, digestOf(job))) fails.push(`capture vs job ${strat}/${feed} ${shape} n=${size}`);
+      const want=job.input.slice().sort((a,b)=>a-b);
+      if(!(job.sort.output.length===want.length && job.sort.output.every((v,i)=>v===want[i]))) fails.push(`sort ${strat} ${shape} n=${size}`);
+      checked++;
+    }
+    return { ok:fails.length===0, checked, fails:fails.slice(0,12), totalFails:fails.length };
+  }
+
   /* ---- CSRBT order statistics over the built tree (the payoff of feeding a sorted run) ----
      Subtree sizes are computed in one pass on the (now static) tree, then select/rank are O(log n),
      exactly the queries CSRBT's RankedSet exposes (select 1-indexed, rank, min/max/median/percentile). */
@@ -678,7 +735,7 @@
     return { n, select, rank, nodeAtRank, min, max, median, percentile, countInRange };
   }
 
-  const SBSViz = { mulberry32, generate, profile, select, sorter, RBTree, validateRB, feedOrder, feeder, buildJob, selfTest, STRATS, Bandit, tuneDemo, digestOf, digestEquals, recordOf, replayDigest, encodeRun, decodeRun, orderStats };
+  const SBSViz = { mulberry32, generate, profile, select, sorter, RBTree, validateRB, feedOrder, feeder, buildJob, selfTest, STRATS, Bandit, tuneDemo, digestOf, digestEquals, recordOf, replayDigest, encodeRun, decodeRun, captureOf, rebuildFromCapture, replayDigestFromCapture, encodeCapture, decodeCapture, captureRoundtripTest, orderStats };
   global.SBSViz = SBSViz;
 
   /* ============================ DOM layer ============================ */
@@ -696,6 +753,7 @@
     stProfile:$("st-profile"), stSelect:$("st-select"), stSort:$("st-sort"), stFeed:$("st-feed"),
     tune:$("tune"), tunerbody:$("tunerbody"),
     newdata:$("newdata"), rectoken:$("rectoken"), reccopy:$("reccopy"), recreplay:$("recreplay"), recstatus:$("recstatus"),
+    recsave:$("recsave"), recload:$("recload"), recloadfile:$("recloadfile"),
     osline:$("osline"), osrank:$("osrank"), osk:$("osk"), osval:$("osval"),
   };
 
@@ -704,6 +762,8 @@
   let liveTree=null, insC=0, rotC=0;
   const bandit = SBSViz.Bandit();
   let currentSeed = 12345;
+  let lastCapture=null;   // the current run, serialized for Save
+  let replaying=false;    // true while replaying a loaded capture (so it never re-trains the bandit)
 
   function stageActive(name){
     document.querySelectorAll(".stage").forEach(s=>s.classList.toggle("active", s.dataset.stage===name));
@@ -829,17 +889,9 @@
     ui.tunerbody.innerHTML=`<div class="tctx">context <code>${snap.context}</code> &mdash; bandit would run <b>${snap.pick}</b></div>${rows}`;
   }
 
-  function compile(){
-    const policy=ui.policy.value, shape=ui.shape.value, size=+ui.size.value, intKeys=ui.intkeys.checked;
-    let stratOverride=ui.strat.value, banditReason=null;
-    if(policy==="BANDIT" && stratOverride==="auto"){
-      const pp=SBSViz.profile(SBSViz.generate(shape,size,currentSeed), intKeys);
-      stratOverride=bandit.select(pp);
-      const arm=bandit.snapshot(pp).arms.find(a=>a.id===stratOverride);
-      banditReason=`self-tuning bandit → ${stratOverride} (${arm.pulls>1?arm.pulls+" pulls observed":"on prior, not yet tuned"})`;
-    }
-    const o={ shape, size, intKeys, policy: policy==="BANDIT"?"SMART":policy, stratOverride, feedOverride:ui.feed.value, seed:currentSeed };
-    job=buildJob(o);
+  // Assemble all visuals + the timeline from an already-built global `job`. Shared by the live build
+  // (compile) and capture replay (loadCapture), so a recorded run animates through the exact same path.
+  function renderLoadedJob(o, banditReason){
     // reset visuals
     barState=job.input.map(v=>({v, s:"idle", done:false})); cmpC=0; moveC=0; layoutBars();
     liveTree=RBTree(); insC=0; rotC=0; renderTree(); ui.rbbadge.textContent="—"; ui.rbbadge.className="badge";
@@ -868,9 +920,41 @@
     ui.stSort.innerHTML=`—<br><small>pending</small>`;
     ui.stFeed.innerHTML=`${job.feedMode}<br><small>pending</small>`;
     renderBandit(job.profile);
-    ui.rectoken.value = SBSViz.encodeRun({ v:1, config:{ shape, size, intKeys, policy, strat:job.strategy, feed:ui.feed.value, seed:currentSeed }, digest: SBSViz.digestOf(job) });
-    ui.recstatus.textContent = "";
+    const tokenCfg={ shape:o.shape, size:o.size, intKeys:o.intKeys, policy:ui.policy.value, strat:job.strategy, feed:ui.feed.value, seed:o.seed };
+    ui.rectoken.value = SBSViz.encodeRun({ v:1, config:tokenCfg, digest: SBSViz.digestOf(job) });
+    lastCapture = SBSViz.captureOf(job, tokenCfg, banditReason||job.plan.reason); // self-contained, for Save
     ostatsCur=null; ui.osline.textContent="run to build the tree, then query"; ui.osval.textContent="—"; ui.osrank.max=1; ui.osrank.value=1; ui.osk.textContent="1";
+  }
+
+  function compile(){
+    replaying=false;                                            // a fresh live build clears replay mode
+    const policy=ui.policy.value, shape=ui.shape.value, size=+ui.size.value, intKeys=ui.intkeys.checked;
+    let stratOverride=ui.strat.value, banditReason=null;
+    if(policy==="BANDIT" && stratOverride==="auto"){
+      const pp=SBSViz.profile(SBSViz.generate(shape,size,currentSeed), intKeys);
+      stratOverride=bandit.select(pp);
+      const arm=bandit.snapshot(pp).arms.find(a=>a.id===stratOverride);
+      banditReason=`self-tuning bandit → ${stratOverride} (${arm.pulls>1?arm.pulls+" pulls observed":"on prior, not yet tuned"})`;
+    }
+    const o={ shape, size, intKeys, policy: policy==="BANDIT"?"SMART":policy, stratOverride, feedOverride:ui.feed.value, seed:currentSeed };
+    job=buildJob(o);
+    renderLoadedJob(o, banditReason);
+    ui.recstatus.textContent = "";
+  }
+
+  // Load a self-contained capture and replay the recorded run (events come from the file, not a re-run).
+  function loadCapture(cap){
+    const c=cap.config;
+    ui.shape.value=c.shape; ui.size.value=c.size; ui.sizeval.textContent=c.size; ui.intkeys.checked=!!c.intKeys;
+    ui.policy.value=c.policy; ui.strat.value=c.strat; ui.feed.value=c.feed; currentSeed=c.seed;
+    job=SBSViz.rebuildFromCapture(cap);
+    replaying=true;
+    renderLoadedJob({ shape:c.shape, size:c.size, intKeys:!!c.intKeys, seed:c.seed }, cap.selectReason);
+    ui.log.innerHTML=""; stageActive(null);
+    const match=SBSViz.digestEquals(SBSViz.digestOf(job), cap.digest);
+    ui.recstatus.textContent = match ? "✓ capture loaded — replaying recorded run" : "⚠ loaded, but digest differs from record";
+    ui.recstatus.className = "recstatus " + (match?"ok":"bad");
+    play();
   }
 
   function advance(){
@@ -882,7 +966,7 @@
       logEv(cls, `[${item.t}]`, item.d);
       if(item.t==="SORT_COMPLETED") ui.stSort.innerHTML=`${job.sort.comparisons} cmp · ${job.sort.moves} mv<br><small>${job.strategy}</small>`;
       if(item.t==="FEED_COMPLETED") ui.stFeed.innerHTML=`${job.feedMode}<br><small>${job.feed.inserts} keys · ${job.feed.rotations} rot</small>`;
-      if(item.t==="JOB_COMPLETED" && ui.policy.value==="BANDIT"){ bandit.observe(job.profile, job.strategy, job.sort.comparisons+job.sort.moves); logEv("ev-life","[autotune]", `observed ${job.strategy} cost ${job.sort.comparisons+job.sort.moves} → bandit updated`); renderBandit(job.profile); }
+      if(item.t==="JOB_COMPLETED" && ui.policy.value==="BANDIT" && !replaying){ bandit.observe(job.profile, job.strategy, job.sort.comparisons+job.sort.moves); logEv("ev-life","[autotune]", `observed ${job.strategy} cost ${job.sort.comparisons+job.sort.moves} → bandit updated`); renderBandit(job.profile); }
       if(item.t==="JOB_COMPLETED") showOrderStats();
     } else if(item.k==="sort"){ stageActive("sort"); applySortStep(item.s); }
     else if(item.k==="feed"){ stageActive("feed"); applyFeedStep(item.s); }
@@ -923,12 +1007,31 @@
     ui.recstatus.className = "recstatus " + (ok?"ok":"bad");
     play();
   });
+  ui.recsave.addEventListener("click", ()=>{
+    if(!lastCapture){ ui.recstatus.textContent="✗ nothing to save yet"; ui.recstatus.className="recstatus bad"; return; }
+    const c=lastCapture.config;
+    const blob=new Blob([SBSViz.encodeCapture(lastCapture)], {type:"application/json"});
+    const url=URL.createObjectURL(blob); const a=document.createElement("a");
+    a.href=url; a.download=`sbs-${c.shape}-n${c.size}-${c.strat}-${c.feed}-seed${c.seed}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    ui.recstatus.textContent="saved capture (.json)"; ui.recstatus.className="recstatus ok";
+  });
+  ui.recload.addEventListener("click", ()=> ui.recloadfile.click());
+  ui.recloadfile.addEventListener("change", (e)=>{
+    const file=e.target.files && e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=()=>{ let cap; try{ cap=SBSViz.decodeCapture(String(reader.result)); }catch(err){ ui.recstatus.textContent="✗ not a valid capture file"; ui.recstatus.className="recstatus bad"; return; } stop(); ui.run.textContent="▶ Run"; loadCapture(cap); };
+    reader.onerror=()=>{ ui.recstatus.textContent="✗ could not read file"; ui.recstatus.className="recstatus bad"; };
+    reader.readAsText(file); e.target.value="";   // allow re-loading the same file
+  });
   ui.osrank.addEventListener("input", updateSelect);
 
   // boot
   reset();
   // surface a quick self-check in the console for the curious
   try { const r=SBSViz.selfTest(40); console.log("SBSViz selfTest:", r.ok?`OK (${r.checked} checks)`:`FAIL`, r.ok?"":r.fails); } catch(e){ console.warn(e); }
+  try { const r=SBSViz.captureRoundtripTest(40); console.log("SBSViz captureRoundtrip:", r.ok?`OK (${r.checked} captures)`:`FAIL`, r.ok?"":r.fails); } catch(e){ console.warn(e); }
 
 })(typeof globalThis!=="undefined"?globalThis:this);
 </script>

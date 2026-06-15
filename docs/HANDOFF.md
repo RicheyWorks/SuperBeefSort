@@ -108,6 +108,18 @@ run building into a red-black tree on the right (rotations, recolor, an RB-valid
 shows it converging per context. Pure JS/SVG, so it runs offline; the pure core is headless-tested
 (4800 sort/RB checks + bandit convergence).
 
+**Record-and-replay (self-contained captures):** alongside the existing compact token (which reproduces
+a run by re-executing from its seed + a digest checksum), the visualizer now exports a **capture** —
+`{config, input, profile, plan, sortedDistinct, sort+feed event streams, digest}` — via a **⤓ Save**
+button (downloads `.json`) and re-loads it via **⤒ Load**. A capture replays the *recorded* event stream
+verbatim (the RB tree is rebuilt from the stored feed events: `buildBalanced` for bulk, else the recorded
+inserts in order), so it shows the original animation even if the engine code later changes — a portable
+teaching / bug-repro artifact, steppable with the existing Step button. Replay never re-trains the bandit
+(guarded by a `replaying` flag). `compile()` was split into a reusable `renderLoadedJob(job)` so the live
+path and replay share one timeline builder. New headless check `SBSViz.captureRoundtripTest` (in the boot
+console) asserts a JSON-round-tripped capture replays to the same digest as a fresh run across all 8
+strategies × 4 feed modes; verified in Node (160 captures green).
+
 **Tooling:** JMH suite in `src/jmh/java` (`SortStrategyBenchmark` across data shapes, `FeedBenchmark`
 bulk vs balanced) — run `./gradlew jmh`; note `build` does NOT compile `src/jmh`, so use `jmh` /
 `compileJmhJava` to verify the benchmarks. GitHub Actions CI (`.github/workflows/ci.yml`) checks out SBS
@@ -192,8 +204,10 @@ Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedS
 All three IDEAS "top picks" are now done (O(n) bulk-build, self-tuning selector, web visualizer).
 Quick wins if picking up cold: push host-side first (SBS **and** the sibling CSRBT changes, or CI stays
 red), then pick a roadmap phase — Phase 3's ensemble range-sharded parallel feed is the next natural
-CSRBT-native win; Phase 2's Rust kernel is the heaviest lift. Smaller: record-and-replay in the
-visualizer (the true inversion-count signal is now done — see above).
+CSRBT-native win; Phase 2's Rust kernel is the heaviest lift. (The true inversion-count signal and the
+visualizer's record-and-replay captures are both now done — see above.) Smaller remaining: fold the
+inversion estimate into the TimSort run-count model, or a true inversion-count signal in the JS profiler
+to mirror the Java one in the visualizer.
 
 ## Repo / push status
 

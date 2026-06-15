@@ -51,8 +51,10 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 
 - **Web step-visualizer** over the `SortEvent` stream: watch the partitions, then watch CSRBT's
   rotations as the run feeds in.
-- **Record-and-replay**: serialize `{seed, profile, plan, events}` for deterministic repro + a
-  teaching mode.
+- ~~**Record-and-replay**: serialize `{seed, profile, plan, events}` for deterministic repro + a
+  teaching mode.~~ — ✅ done: the visualizer exports/loads self-contained `.json` captures (config +
+  input + profile + plan + sort/feed event streams + digest) and replays the recorded events verbatim;
+  `SBSViz.captureRoundtripTest` covers the JSON round-trip.
 - **JMH suite + invariant validator** (permutation + order) wired as a CI perf-regression gate.
 - **OpenTelemetry spans** per pipeline stage; a `SortReport` with comparisons, moves, kernel time,
   feed time, CSRBT rotations, throughput (items/s).

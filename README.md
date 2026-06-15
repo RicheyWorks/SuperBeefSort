@@ -106,6 +106,11 @@ Straight from the verified implementations: BULK feeding does **zero** rotations
 DIRECT's roughly-linear growth), and the Batcher small-sort networks do about half insertion's
 worst-case comparisons by n=16 (63 vs 120).
 
+And here's what that small-sort kernel actually is — the verified Batcher network the engine runs for
+small ranges (n=8 shown; the same data the `SortingNetworkTest` and 0/1-principle check validate):
+
+![Sorting network for n=8 — the Batcher comparator network the kernel runs](docs/sorting-network-8.svg)
+
 ## Adding a strategy
 
 Implement `SortStrategy<K>`, then either register it on a `StrategyRegistry` or contribute a

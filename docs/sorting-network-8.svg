@@ -1,0 +1,81 @@
+<svg viewBox="0 0 760 398" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Roboto, system-ui, sans-serif">
+<rect x="0" y="0" width="760" height="398" fill="#0d1117"/>
+<text x="36" y="36" font-size="18" font-weight="700" fill="#e6edf3">Sorting network for n = 8 <tspan fill="#8b98a8" font-weight="400">(Batcher odd-even, 19 comparators)</tspan></text>
+<text x="36" y="55" font-size="11.5" fill="#5a6675">Data-oblivious: each vertical comparator swaps its two wires if out of order. The same fixed pattern sorts every input.</text>
+<line x1="80" y1="70" x2="698" y2="70" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="74" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">0</text>
+<line x1="80" y1="104" x2="698" y2="104" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="108" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">1</text>
+<line x1="80" y1="138" x2="698" y2="138" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="142" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">2</text>
+<line x1="80" y1="172" x2="698" y2="172" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="176" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">3</text>
+<line x1="80" y1="206" x2="698" y2="206" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="210" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">4</text>
+<line x1="80" y1="240" x2="698" y2="240" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="244" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">5</text>
+<line x1="80" y1="274" x2="698" y2="274" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="278" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">6</text>
+<line x1="80" y1="308" x2="698" y2="308" stroke="#34425a" stroke-width="2"/>
+<text x="70" y="312" font-size="11" fill="#8b98a8" text-anchor="end" font-family="monospace">7</text>
+<text x="70" y="52" font-size="10" fill="#5a6675" text-anchor="end">wire</text>
+<line x1="139.0" y1="70" x2="139.0" y2="104" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="139.0" cy="70" r="4.5" fill="#d9603b"/>
+<circle cx="139.0" cy="104" r="4.5" fill="#d9603b"/>
+<line x1="139.0" y1="138" x2="139.0" y2="172" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="139.0" cy="138" r="4.5" fill="#d9603b"/>
+<circle cx="139.0" cy="172" r="4.5" fill="#d9603b"/>
+<line x1="139.0" y1="206" x2="139.0" y2="240" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="139.0" cy="206" r="4.5" fill="#d9603b"/>
+<circle cx="139.0" cy="240" r="4.5" fill="#d9603b"/>
+<line x1="139.0" y1="274" x2="139.0" y2="308" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="139.0" cy="274" r="4.5" fill="#d9603b"/>
+<circle cx="139.0" cy="308" r="4.5" fill="#d9603b"/>
+<line x1="197.0" y1="70" x2="197.0" y2="138" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="197.0" cy="70" r="4.5" fill="#d9603b"/>
+<circle cx="197.0" cy="138" r="4.5" fill="#d9603b"/>
+<line x1="197.0" y1="206" x2="197.0" y2="274" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="197.0" cy="206" r="4.5" fill="#d9603b"/>
+<circle cx="197.0" cy="274" r="4.5" fill="#d9603b"/>
+<line x1="255.0" y1="104" x2="255.0" y2="172" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="255.0" cy="104" r="4.5" fill="#d9603b"/>
+<circle cx="255.0" cy="172" r="4.5" fill="#d9603b"/>
+<line x1="255.0" y1="240" x2="255.0" y2="308" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="255.0" cy="240" r="4.5" fill="#d9603b"/>
+<circle cx="255.0" cy="308" r="4.5" fill="#d9603b"/>
+<line x1="313.0" y1="104" x2="313.0" y2="138" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="313.0" cy="104" r="4.5" fill="#d9603b"/>
+<circle cx="313.0" cy="138" r="4.5" fill="#d9603b"/>
+<line x1="313.0" y1="240" x2="313.0" y2="274" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="313.0" cy="240" r="4.5" fill="#d9603b"/>
+<circle cx="313.0" cy="274" r="4.5" fill="#d9603b"/>
+<line x1="313.0" y1="172" x2="313.0" y2="206" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="313.0" cy="172" r="4.5" fill="#d9603b"/>
+<circle cx="313.0" cy="206" r="4.5" fill="#d9603b"/>
+<line x1="371.0" y1="70" x2="371.0" y2="206" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="371.0" cy="70" r="4.5" fill="#d9603b"/>
+<circle cx="371.0" cy="206" r="4.5" fill="#d9603b"/>
+<line x1="371.0" y1="240" x2="371.0" y2="274" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="371.0" cy="240" r="4.5" fill="#d9603b"/>
+<circle cx="371.0" cy="274" r="4.5" fill="#d9603b"/>
+<line x1="429.0" y1="138" x2="429.0" y2="274" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="429.0" cy="138" r="4.5" fill="#d9603b"/>
+<circle cx="429.0" cy="274" r="4.5" fill="#d9603b"/>
+<line x1="487.0" y1="138" x2="487.0" y2="206" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="487.0" cy="138" r="4.5" fill="#d9603b"/>
+<circle cx="487.0" cy="206" r="4.5" fill="#d9603b"/>
+<line x1="545.0" y1="104" x2="545.0" y2="240" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="545.0" cy="104" r="4.5" fill="#d9603b"/>
+<circle cx="545.0" cy="240" r="4.5" fill="#d9603b"/>
+<line x1="603.0" y1="172" x2="603.0" y2="308" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="603.0" cy="172" r="4.5" fill="#d9603b"/>
+<circle cx="603.0" cy="308" r="4.5" fill="#d9603b"/>
+<line x1="603.0" y1="104" x2="603.0" y2="138" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="603.0" cy="104" r="4.5" fill="#d9603b"/>
+<circle cx="603.0" cy="138" r="4.5" fill="#d9603b"/>
+<line x1="661.0" y1="172" x2="661.0" y2="240" stroke="#d9603b" stroke-width="2.4"/>
+<circle cx="661.0" cy="172" r="4.5" fill="#d9603b"/>
+<circle cx="661.0" cy="240" r="4.5" fill="#d9603b"/>
+<text x="80" y="342" font-size="11" fill="#5a6675">unsorted in  &#8594;  (left)</text>
+<text x="698" y="342" font-size="11" fill="#1d9e75" text-anchor="end">&#8594;  sorted out (right)</text>
+</svg>

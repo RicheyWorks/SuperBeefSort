@@ -64,4 +64,6 @@ final class SortingNetwork {
                 b.swap(i, j);
             }
         }
+    }
+}
    

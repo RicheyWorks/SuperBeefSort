@@ -80,7 +80,7 @@ One pipeline, every stage pluggable:
 
 | Stage | Component | Behavior |
 |-------|-----------|----------|
-| Profile | `IntelligentDataProfiler` | sortedness, distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
+| Profile | `IntelligentDataProfiler` | sortedness + longest run, distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
 | Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; the bandit learns the cheapest per context from observed cost |
 | Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · 3-way quick · heap · intro · JDK · counting · LSD radix |
 | Feed | `SortFeeder` + `CsrbtTarget` | `BulkBuildFeeder` (O(n)) · `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `PrecisionFeeder` (validate-every-insert) · `DirectFeeder` |

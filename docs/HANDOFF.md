@@ -154,8 +154,9 @@ Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedS
   profiling so sort metrics exclude them, but the profile pass itself isn't separately timed).
 - `nearlySorted` uses the adjacent-pair ratio, not total inversions. It now routes to run-aware
   TimSort (O(n log n) worst case), so a "locally sorted" input with distant inversions no longer blows
-  up the way plain insertion did (the demo surfaced 16M moves before this fix). A true run- or
-  inversion-count signal in the profiler is still a nice-to-have.
+  up the way plain insertion did (the demo surfaced 16M moves before this fix). The profiler now
+  measures `longestRun` (the longest ascending run, on `DataProfile`); wiring it into selection and a
+  true inversion count are still open.
 - Parallel/streaming/external sort not implemented.
 
 ## Next steps (roadmap)

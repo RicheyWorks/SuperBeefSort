@@ -21,16 +21,24 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
     public DataProfile profile(SortBuffer<K> b, ProfileDepth depth) {
         int n = b.size();
         if (n < 2) {
-            return new DataProfile(n, 1.0, false, depth, n, null, Distribution.UNKNOWN);
+            return new DataProfile(n, 1.0, false, depth, n, null, Distribution.UNKNOWN, n);
         }
 
         long inOrder = 0;
         long pairs = 0;
         boolean duplicates = false;
+        int curRun = 1;
+        int longestRun = 1;
         for (int i = 1; i < n; i++) {
             int c = b.compare(i - 1, i);
             if (c <= 0) {
                 inOrder++;
+                curRun++;
+                if (curRun > longestRun) {
+                    longestRun = curRun;
+                }
+            } else {
+                curRun = 1;
             }
             if (c == 0) {
                 duplicates = true;
@@ -46,7 +54,7 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
                 K v = b.get(i);
                 hll.add(mix(v == null ? 0L : v.hashCode()));
             }
-            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN);
+            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun);
         }
 
         long[] keys = new long[n];
@@ -59,7 +67,7 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             for (long k : keys) {
                 hll.add(mix(k));
             }
-            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN);
+            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun);
         }
 
         long min = Long.MAX_VALUE;
@@ -95,7 +103,7 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             distribution = classify(histogram, n);
         }
 
-        return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), keyStats, distribution);
+        return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), keyStats, distribution, longestRun);
     }
 
     /** Sample adjacent pairs and confirm the encoding agrees with the comparator's strict order. */

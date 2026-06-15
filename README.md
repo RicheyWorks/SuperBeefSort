@@ -13,8 +13,8 @@ feeding personality, sorts, then builds into CSRBT's `OrderedSet` / `EnsembleOrd
 respecting its health gates and order statistics.
 
 It's not a sorting library — it's an engine: **profile → select → sort → feed**, every stage
-pluggable. Java is the spine; Rust kernels, a Python intelligence service, and a web visualizer are
-later phases, all optional accelerators behind the same interfaces.
+pluggable. Java is the spine, and a dependency-free web step-visualizer ships today; Rust kernels and a
+Python intelligence service are optional later-phase accelerators behind the same interfaces.
 
 ![SuperBeefSort architecture — profile, select, sort, feed into CSRBT](docs/architecture.svg)
 
@@ -29,7 +29,7 @@ later phases, all optional accelerators behind the same interfaces.
 | 2 | Rust radix kernel via Panama FFM (Java fallback retained) | planned |
 | 3 | Ensemble range-sharded feeding + streaming/backpressure | planned |
 | 4–5 | Python ML selection · distributed / external sort | planned |
-| ✦ | **Shipped extras:** opt-in cost-model + self-tuning (bandit) selectors · JMH suite · CI · web step-visualizer | ✅ done |
+| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling · `SortReport` · JMH · CI · web step-visualizer | ✅ done |
 
 ## Build & test
 
@@ -72,7 +72,10 @@ BeefSort.with(Comparator.<Integer>naturalOrder())
         .feedInto(set);                         // sorted, balanced build into CSRBT
 ```
 
-Without a `keyEncoder`, the engine behaves exactly like Phase 0 (comparison sorts only).
+Without a `keyEncoder`, the engine behaves exactly like Phase 0 (comparison sorts only). Swap the
+selection brain with `.selector(new BanditStrategySelector())` — it learns the cheapest strategy per
+data shape across runs — and call `SortReport.of(result)` for a one-line dashboard of comparisons,
+moves, feed time, and end-to-end throughput.
 
 ## How it works
 

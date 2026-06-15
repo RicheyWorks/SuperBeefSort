@@ -20,6 +20,7 @@ import io.github.richeyworks.superbeefsort.profile.DataProfiler;
 import io.github.richeyworks.superbeefsort.profile.IntelligentDataProfiler;
 import io.github.richeyworks.superbeefsort.profile.ProfileDepth;
 import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
+import io.github.richeyworks.superbeefsort.select.LearningStrategySelector;
 import io.github.richeyworks.superbeefsort.select.RuleBasedStrategySelector;
 import io.github.richeyworks.superbeefsort.select.SortPlan;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
@@ -91,6 +92,14 @@ public final class BeefSortEngine<K> {
 
         SortResult metrics = new SortResult(strategy.id(), buffer.size(),
                 buffer.comparisons() - beforeComparisons, buffer.moves() - beforeMoves, elapsed);
+
+        // Close the learning loop: a self-tuning selector observes what the chosen strategy actually
+        // cost on this input, so its next choice for similar data is informed by reality. Opt-in —
+        // stateless selectors don't implement this and pay nothing.
+        if (selector instanceof LearningStrategySelector learner) {
+            learner.observe(profile, metrics.strategyId(), metrics);
+        }
+
         obs.onEvent(SortEvent.of(SortEvent.Type.SORT_COMPLETED,
                 strategy.id() + " in " + String.format("%.2f", metrics.elapsedMillis()) + " ms"));
 

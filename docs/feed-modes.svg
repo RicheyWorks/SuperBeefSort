@@ -1,0 +1,93 @@
+<svg viewBox="0 0 1100 480" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Roboto, system-ui, sans-serif">
+<rect x="0" y="0" width="1100" height="480" fill="#0d1117"/>
+<text x="30" y="42" font-size="21" font-weight="700" fill="#e6edf3">Feeding a sorted run into CSRBT — why the order matters</text>
+<text x="30" y="64" font-size="12.5" fill="#5a6675">All three build the identical ordered set; the work to get there is what differs.  (n = 15 distinct keys, sorted)</text>
+<text x="30" y="96" font-size="11" fill="#8b98a8">insertion order:</text>
+<rect x="132" y="86" width="11" height="11" rx="2" fill="#96a0b0"/>
+<rect x="144" y="86" width="11" height="11" rx="2" fill="#8c96a5"/>
+<rect x="156" y="86" width="11" height="11" rx="2" fill="#828b9a"/>
+<rect x="168" y="86" width="11" height="11" rx="2" fill="#78818f"/>
+<rect x="180" y="86" width="11" height="11" rx="2" fill="#6e7784"/>
+<rect x="192" y="86" width="11" height="11" rx="2" fill="#646c79"/>
+<rect x="204" y="86" width="11" height="11" rx="2" fill="#5a626f"/>
+<rect x="216" y="86" width="11" height="11" rx="2" fill="#505864"/>
+<rect x="228" y="86" width="11" height="11" rx="2" fill="#464d59"/>
+<rect x="240" y="86" width="11" height="11" rx="2" fill="#3c434e"/>
+<rect x="252" y="86" width="11" height="11" rx="2" fill="#323943"/>
+<rect x="264" y="86" width="11" height="11" rx="2" fill="#282e38"/>
+<text x="282" y="96" font-size="11" fill="#5a6675">first → last</text>
+<rect x="30" y="108" width="333" height="320" rx="14" fill="#131a23" stroke="#e5534b" stroke-width="1.6"/>
+<rect x="46" y="126" width="301" height="30" rx="8" fill="#331e23" stroke="#e5534b" stroke-width="1"/>
+<text x="60" y="146" font-size="15" font-weight="700" fill="#e5534b" font-family="monospace">FeedMode.DIRECT</text>
+<text x="46" y="186" font-size="10.5" letter-spacing="1" fill="#8b98a8">FEED ORDER OVER THE SORTED RUN</text>
+<rect x="46.0" y="194" width="17.9" height="24" rx="2" fill="#e5534b"/>
+<rect x="66.1" y="194" width="17.9" height="24" rx="2" fill="#d84f48"/>
+<rect x="86.1" y="194" width="17.9" height="24" rx="2" fill="#cc4b45"/>
+<rect x="106.2" y="194" width="17.9" height="24" rx="2" fill="#bf4842"/>
+<rect x="126.3" y="194" width="17.9" height="24" rx="2" fill="#b24440"/>
+<rect x="146.3" y="194" width="17.9" height="24" rx="2" fill="#a5403d"/>
+<rect x="166.4" y="194" width="17.9" height="24" rx="2" fill="#993c3a"/>
+<rect x="186.5" y="194" width="17.9" height="24" rx="2" fill="#8c3837"/>
+<rect x="206.5" y="194" width="17.9" height="24" rx="2" fill="#7f3534"/>
+<rect x="226.6" y="194" width="17.9" height="24" rx="2" fill="#733131"/>
+<rect x="246.7" y="194" width="17.9" height="24" rx="2" fill="#662d2e"/>
+<rect x="266.7" y="194" width="17.9" height="24" rx="2" fill="#59292b"/>
+<rect x="286.8" y="194" width="17.9" height="24" rx="2" fill="#4c2529"/>
+<rect x="306.9" y="194" width="17.9" height="24" rx="2" fill="#402226"/>
+<rect x="326.9" y="194" width="17.9" height="24" rx="2" fill="#331e23"/>
+<text x="46" y="290" font-size="46" font-weight="800" fill="#e5534b" font-family="monospace">9</text>
+<text x="76" y="290" font-size="14" fill="#9aa7b6">rotations</text>
+<text x="46" y="314" font-size="11.5" fill="#7e8b9a" font-family="monospace">build cost: O(n log n) inserts</text>
+<text x="46" y="358" font-size="12" font-weight="600" fill="#cdd6e0" font-family="monospace">naive ascending insert:</text>
+<text x="46" y="378" font-size="11.5" fill="#9aa7b6">every key skews the tree — most rotations</text>
+<rect x="383" y="108" width="333" height="320" rx="14" fill="#131a23" stroke="#d6a14a" stroke-width="1.6"/>
+<rect x="399" y="126" width="301" height="30" rx="8" fill="#302c23" stroke="#d6a14a" stroke-width="1"/>
+<text x="413" y="146" font-size="15" font-weight="700" fill="#d6a14a" font-family="monospace">FeedMode.BALANCED</text>
+<text x="399" y="186" font-size="10.5" letter-spacing="1" fill="#8b98a8">FEED ORDER OVER THE SORTED RUN</text>
+<rect x="399.0" y="194" width="17.9" height="24" rx="2" fill="#b38842"/>
+<rect x="419.1" y="194" width="17.9" height="24" rx="2" fill="#be9044"/>
+<rect x="439.1" y="194" width="17.9" height="24" rx="2" fill="#a77f3f"/>
+<rect x="459.2" y="194" width="17.9" height="24" rx="2" fill="#ca9947"/>
+<rect x="479.3" y="194" width="17.9" height="24" rx="2" fill="#8f6f39"/>
+<rect x="499.3" y="194" width="17.9" height="24" rx="2" fill="#9b773c"/>
+<rect x="519.4" y="194" width="17.9" height="24" rx="2" fill="#836636"/>
+<rect x="539.5" y="194" width="17.9" height="24" rx="2" fill="#d6a14a"/>
+<rect x="559.5" y="194" width="17.9" height="24" rx="2" fill="#604d2e"/>
+<rect x="579.6" y="194" width="17.9" height="24" rx="2" fill="#6c5631"/>
+<rect x="599.7" y="194" width="17.9" height="24" rx="2" fill="#54452b"/>
+<rect x="619.7" y="194" width="17.9" height="24" rx="2" fill="#775e34"/>
+<rect x="639.8" y="194" width="17.9" height="24" rx="2" fill="#3c3425"/>
+<rect x="659.9" y="194" width="17.9" height="24" rx="2" fill="#483c28"/>
+<rect x="679.9" y="194" width="17.9" height="24" rx="2" fill="#302c23"/>
+<text x="399" y="290" font-size="46" font-weight="800" fill="#d6a14a" font-family="monospace">5</text>
+<text x="429" y="290" font-size="14" fill="#9aa7b6">rotations</text>
+<text x="399" y="314" font-size="11.5" fill="#7e8b9a" font-family="monospace">build cost: O(n log n), median-first</text>
+<text x="399" y="358" font-size="12" font-weight="600" fill="#cdd6e0" font-family="monospace">BalancedBuildFeeder:</text>
+<text x="399" y="378" font-size="11.5" fill="#9aa7b6">insert each subrange median first — fewer rotations</text>
+<rect x="736" y="108" width="333" height="320" rx="14" fill="#131a23" stroke="#1d9e75" stroke-width="1.6"/>
+<rect x="752" y="126" width="301" height="30" rx="8" fill="#0f2b2a" stroke="#1d9e75" stroke-width="1"/>
+<text x="766" y="146" font-size="15" font-weight="700" fill="#1d9e75" font-family="monospace">FeedMode.BULK</text>
+<text x="752" y="186" font-size="10.5" letter-spacing="1" fill="#8b98a8">FEED ORDER OVER THE SORTED RUN</text>
+<rect x="752.0" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="772.1" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="792.1" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="812.2" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="832.3" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="852.3" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="872.4" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="892.5" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="912.5" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="932.6" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="952.7" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="972.7" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="992.8" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="1012.9" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<rect x="1032.9" y="194" width="17.9" height="24" rx="2" fill="#1c936e"/>
+<text x="902" y="210" text-anchor="middle" font-size="11" font-weight="700" fill="#06140e" font-family="monospace">built together</text>
+<text x="752" y="290" font-size="46" font-weight="800" fill="#1d9e75" font-family="monospace">0</text>
+<text x="782" y="290" font-size="14" fill="#9aa7b6">rotations</text>
+<text x="752" y="314" font-size="11.5" fill="#7e8b9a" font-family="monospace">build cost: O(n) direct build</text>
+<text x="752" y="358" font-size="12" font-weight="600" fill="#cdd6e0" font-family="monospace">BulkBuildFeeder:</text>
+<text x="752" y="378" font-size="11.5" fill="#9aa7b6">CSRBT buildBalanced — 0 rotations, 0 compares</text>
+<text x="30" y="462" font-size="11" fill="#6b7787">Rotations scale with n — 9 / 5 / 0 at n=15;  23 / 14 / 0 at n=31.   SBS sorts first, so it can feed in the cheapest order — a feeder, not just a sorter.   (ARCHITECTURE §6.2)</text>
+</svg>

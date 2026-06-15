@@ -92,6 +92,8 @@ One pipeline, every stage pluggable:
 subrange first — an `O(n)`-ish balanced build that minimizes rotations. `HealthGatedFeeder` batches
 it and calls CSRBT's `selfRepair()` between batches.
 
+![Feed modes — why feeding a sorted run in the right order minimizes CSRBT rotations](docs/feed-modes.svg)
+
 **Safe non-comparison sorts.** Counting/radix need integer keys, supplied via a `KeyEncoder`. The
 profiler samples the data to confirm the encoding agrees with the comparator's order; if it doesn't,
 integer stats are withheld and the engine stays on comparison sorts — never silently reordering keys.

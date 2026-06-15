@@ -208,6 +208,9 @@ Event types: `JobStarted`, `Profiled`, `PlanSelected`, step-level `Comparison/Sw
 `CsrbtTarget<K>` wraps `OrderedSet<K>` and `EnsembleOrderedSet<K>` and exposes exactly what feeders need: ordered insert, optional bulk construction, health status, ensemble member enumeration, and order-statistic hooks. SBS talks to CSRBT only through this adapter, so CSRBT internals can evolve independently.
 
 ### 6.2 The big win — feed *sorted* data as a near-O(n) balanced build
+
+![Feed modes into CSRBT — DIRECT vs BALANCED vs BULK rotation cost](feed-modes.svg)
+
 Naively inserting `n` items one-by-one is `O(n log n)` and triggers many rotations. But SBS has *already sorted* the data, and a balanced BST can be built from a sorted sequence in `O(n)` with correct black-heights. Two paths:
 - **If CSRBT exposes a bulk / `fromSorted` constructor:** hand it the sorted run directly. Best case.
 - **If it doesn't:** emulate with **balanced insertion order** — insert the median of each subrange first (recursive midpoint ordering), which minimizes rotations and approximates a balanced build through the public insert API.

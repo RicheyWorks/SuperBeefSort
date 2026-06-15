@@ -18,7 +18,7 @@ Python intelligence service are optional later-phase accelerators behind the sam
 
 ![SuperBeefSort architecture — profile, select, sort, feed into CSRBT](docs/architecture.svg)
 
-**Docs:** [architecture & design](docs/ARCHITECTURE.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md) · [step visualizer](web/visualizer.html)
+**Docs:** [architecture & design](docs/ARCHITECTURE.md) · [Phase 3 parallel-feed design](docs/PHASE3-PARALLEL-FEED.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md) · [step visualizer](web/visualizer.html)
 
 ## Status
 

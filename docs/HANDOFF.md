@@ -234,8 +234,10 @@ default rule-selector choice: still counting/radix (learned is reachable via the
   variant; `RadixSortStrategy` with `backingRuntime = RUST`; keep the Java radix as the capability
   fallback. Targets JDK 22+ in that module only.
 - **Phase 3 — deeper CSRBT.** Range-sharded **parallel** feed into `EnsembleOrderedSet` (sorted runs
-  make range partitioning trivial); streaming/backpressure feeder; precision feeder; surface CSRBT
-  rotations/morphs in metrics.
+  make range partitioning trivial) — **build-ready design in [`PHASE3-PARALLEL-FEED.md`](PHASE3-PARALLEL-FEED.md)**
+  (the SBS↔CSRBT contract, a lock-free `ParallelFeeder`, fallback, tests, and the assumptions to verify
+  against CSRBT first); streaming/backpressure feeder; precision feeder; surface CSRBT rotations/morphs in
+  metrics.
 - **Phase 4 — Python intelligence.** `SbsIntelligence` gRPC service: ML profiler + learned strategy
   selection behind the existing `StrategySelector` interface.
 - **Phase 5 — observability + scale.** TypeScript step visualizer over the `SortEvent` stream;

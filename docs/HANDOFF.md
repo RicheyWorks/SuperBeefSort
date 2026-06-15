@@ -120,6 +120,13 @@ path and replay share one timeline builder. New headless check `SBSViz.captureRo
 console) asserts a JSON-round-tripped capture replays to the same digest as a fresh run across all 8
 strategies × 4 feed modes; verified in Node (160 captures green).
 
+**Inversion signal in the visualizer:** the demo's JS profiler now mirrors the Java one — it computes an
+exact merge-count inversion count (`inversions` / `inversionRatio`), shows it in the PROFILED event and
+the profile-stage header, and the JS rule selector routes genuinely-few-inversion inputs (`<= 2n`) to
+insertion (with the bandit context/prior updated to match). So a high-adjacency-but-globally-disordered
+input (e.g. a rotation) is visibly *not* sent to insertion. Pure-core logic verified in Node (merge-count
+== brute force over 300 random arrays; routing matches `RuleBasedStrategySelector`).
+
 **Tooling:** JMH suite in `src/jmh/java` (`SortStrategyBenchmark` across data shapes, `FeedBenchmark`
 bulk vs balanced) — run `./gradlew jmh`; note `build` does NOT compile `src/jmh`, so use `jmh` /
 `compileJmhJava` to verify the benchmarks. GitHub Actions CI (`.github/workflows/ci.yml`) checks out SBS

@@ -20,6 +20,7 @@ import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
  * <ul>
  *   <li>introsort (robust comparison sort): {@code n log2 n}</li>
  *   <li>run-aware TimSort: {@code 1.3 · n · log2(runs)}, with runs inferred from sortedness</li>
+ *   <li>insertion (adaptive): {@code n + inversions}, considered only when the inversion count is exact</li>
  *   <li>counting (needs a faithful integer key in a bounded range): {@code n + range}</li>
  *   <li>LSD radix (needs a faithful integer key): {@code ~8 · n} (fixed byte passes)</li>
  * </ul>
@@ -61,6 +62,17 @@ public final class CostModelStrategySelector implements StrategySelector {
             bestId = JdkSortStrategy.ID;
             bestCost = timsortCost;
             why = "few runs (~" + runs + ") -> TimSort";
+        }
+
+        // Insertion sort's real cost is its adaptive O(n + inversions). Only trusted when the inversion
+        // count is EXACT (small/DEEP inputs); an estimate is never used to pick an O(n^2)-risk strategy.
+        if (p.inversionsExact() && p.inversions() >= 0) {
+            double insertionCost = (double) n + p.inversions();
+            if (insertionCost < bestCost) {
+                bestId = InsertionSortStrategy.ID;
+                bestCost = insertionCost;
+                why = "n+inversions insertion (" + p.inversions() + " inv)";
+            }
         }
 
         KeyStats ks = p.keyStats();

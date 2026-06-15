@@ -160,7 +160,16 @@ public final class BanditStrategySelector implements LearningStrategySelector {
         double s = p.sortednessRatio();
         String sort = s >= 0.90 ? "near" : s >= 0.60 ? "part" : "rand";
         String keys = p.keyStats() != null ? "int" : "cmp";
-        return size + "|" + sort + "|" + keys + "|" + p.distribution();
+        // A global-disorder band so inputs that look alike by adjacency but differ in true inversion
+        // count (e.g. a far-apart swap) learn separately; "i?" keeps unmeasured profiles in one bucket.
+        String inv;
+        if (!p.inversionsMeasured()) {
+            inv = "i?";
+        } else {
+            double r = p.inversionRatio();
+            inv = r < 0.01 ? "i0" : r < 0.10 ? "iLo" : r < 0.40 ? "iMid" : "iHi";
+        }
+        return size + "|" + sort + "|" + keys + "|" + p.distribution() + "|" + inv;
     }
 
     private static Set<StrategyId> candidateArms(DataProfile p, StrategyRegistry registry) {
@@ -205,7 +214,12 @@ public final class BanditStrategySelector implements LearningStrategySelector {
             case "radix.lsd":
                 return 8.0 * n;                                  // ~8 fixed byte passes
             case "insertion":
-                return n + (1.0 - s) * n * n * 0.25;             // O(n + inversions): cheap only when sorted
+                // True adaptive cost is O(n + inversions). Use the exact count when the profiler measured
+                // one (always the case at insertion's small candidate sizes); else a sortedness proxy.
+                if (p.inversionsExact() && p.inversions() >= 0) {
+                    return n + (double) p.inversions();
+                }
+                return n + (1.0 - s) * n * n * 0.25;             // proxy: cheap only when nearly sorted
             case "jdk.timsort": {
                 double runs = Math.max(1.0, Math.round((1.0 - s) * (n - 1)) + 1);
                 return 1.3 * n * (Math.log(runs) / LN2 + 1.0);   // run-aware

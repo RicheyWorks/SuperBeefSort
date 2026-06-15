@@ -1,6 +1,6 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-14. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete — plus
+Last updated: 2026-06-15. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete — plus
 opt-in cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a web step-visualizer.**
 Earlier work is `./gradlew build` green host-side; this session's selector code (`BanditStrategySelector`
 + the engine feedback hook) is static-reviewed and fuzz-traced but still needs a host-side `./gradlew build`.
@@ -47,6 +47,19 @@ distinct-count, integer `KeyStats` (min/max + counting feasibility), and `Distri
 classification; `KeyEncoder<K>` carried on the buffer enables two stable non-comparison sorts
 (`counting`, `radix.lsd`); selector chooses them from key stats with an introsort fallback; engine
 capability-gates them.
+
+**Global inversion signal:** `DataProfile.inversions` (+ `inversionsExact`, `inversionRatio()`,
+`maxInversions()`) carries a true count of out-of-order pairs — the global disorder the adjacency-only
+`sortednessRatio` misses. The profiler computes it **exactly** via an iterative (stack-safe) bottom-up
+merge-count for small inputs (n <= 8192) or any `DEEP` profile, and **estimates** it from an
+order-preserving strided sample (m = 2048, scaled by `C(n,2)/C(m,2)`) for large `SHALLOW` inputs; it
+uses the raw comparator, so it never inflates the metered sort counters. Wired into all three
+selectors: the rule-based selector routes genuinely-few-inversion inputs (`inversions <= 2n`, **exact
+only**) to adaptive insertion sort; the cost model adds an `n + inversions` insertion candidate (exact
+only); the bandit uses the exact count as the insertion prior and adds an inversion band to its context
+key. The "exact only" gate means a sampling underestimate can never route a high-inversion input into
+O(n^2) — exact counts exist precisely where insertion is a candidate. Covered by `InversionCountTest`
+(exact vs brute force, estimate-vs-DEEP tolerance, ratio fallback, and the routing).
 
 **Branchless small-sort kernel:** `SortingNetworkStrategy` sorts tiny inputs (n <= 16) with fixed
 Batcher comparator networks (data-oblivious, branch-light); the rule-based selector now routes tiny
@@ -152,12 +165,15 @@ Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedS
 
 - Profiling comparisons run through `SortBuffer.compare` (the engine snapshots counters *after*
   profiling so sort metrics exclude them, but the profile pass itself isn't separately timed).
-- `nearlySorted` uses the adjacent-pair ratio, not total inversions. It now routes to run-aware
-  TimSort (O(n log n) worst case), so a "locally sorted" input with distant inversions no longer blows
-  up the way plain insertion did (the demo surfaced 16M moves before this fix). The profiler now
-  measures `longestRun` (the longest ascending run, on `DataProfile`), and the rule-based selector
-  routes a long single run (>= 50% of n) to TimSort even when adjacency is below 90%; factoring it into
-  the cost-model/bandit and a true inversion count are still open.
+- `nearlySorted` uses the adjacent-pair ratio, a *local* measure. This is now complemented by two
+  *global* signals on `DataProfile`: `longestRun` (longest ascending run; the rule-based selector
+  routes a single run >= 50% of n to TimSort even below 90% adjacency) and `inversions` (true
+  out-of-order-pair count; wired into all three selectors as above). Residual limitation: for large
+  `SHALLOW` inputs the inversion count is a strided-sample **estimate** — empirically within ~0.013 of
+  the exact ratio over 50 random seeds at n=60k, but systematic sampling can in principle alias with a
+  periodic input, so insertion routing deliberately trusts only the **exact** count (small/`DEEP`).
+  Folding the inversion estimate into the TimSort run-count model (rather than just insertion) is still
+  open.
 - Parallel/streaming/external sort not implemented.
 
 ## Next steps (roadmap)
@@ -177,7 +193,7 @@ All three IDEAS "top picks" are now done (O(n) bulk-build, self-tuning selector,
 Quick wins if picking up cold: push host-side first (SBS **and** the sibling CSRBT changes, or CI stays
 red), then pick a roadmap phase — Phase 3's ensemble range-sharded parallel feed is the next natural
 CSRBT-native win; Phase 2's Rust kernel is the heaviest lift. Smaller: record-and-replay in the
-visualizer, or a true inversion-count signal in the profiler.
+visualizer (the true inversion-count signal is now done — see above).
 
 ## Repo / push status
 

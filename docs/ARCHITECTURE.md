@@ -142,7 +142,7 @@ public interface DataProfiler<K> {
 }
 ```
 
-`DataProfile` reports: size `n`; key type; **sortedness ratio** and longest existing run; **distinct-value estimate** (HyperLogLog); distribution class (uniform / skewed / clustered); entropy (bits); min/max (enables non-comparison sorts); comparator-cost estimate; and a ranked list of recommended strategy families. `ProfileDepth` ranges from `SHALLOW` (O(1) sampling) → `DEEP` (full scan) → `ML` (delegate to the Python intelligence plane).
+`DataProfile` reports: size `n`; key type; **sortedness ratio** (a local, adjacent-pair measure) and longest existing run; a **global inversion count** (`inversions` / `inversionRatio()` — the out-of-order-pair distance the adjacency ratio misses, exact for small/`DEEP` inputs and a strided-sample estimate otherwise, flagged by `inversionsExact`); **distinct-value estimate** (HyperLogLog); distribution class (uniform / skewed / clustered); entropy (bits); min/max (enables non-comparison sorts); comparator-cost estimate; and a ranked list of recommended strategy families. `ProfileDepth` ranges from `SHALLOW` (O(1) sampling) → `DEEP` (full scan) → `ML` (delegate to the Python intelligence plane).
 
 ### 5.3 `StrategySelector<K>` — the decision maker
 Maps a `DataProfile` + a `SelectionPolicy` to a concrete `SortPlan`.
@@ -153,7 +153,7 @@ public interface StrategySelector<K> {
 }
 ```
 
-- Default implementation is **rule-based** (capability-driven): e.g. "bounded integer keys with a modest range → `radix`; nearly sorted → `timsort`/run-aware; small `n` → `insertion` or AlphaDev micro-kernel; adversarial → `introsort`."
+- Default implementation is **rule-based** (capability-driven): e.g. "bounded integer keys with a modest range → `radix`; genuinely few inversions (exact, `<= 2n`) → adaptive `insertion`; otherwise nearly sorted / one long run → `timsort`/run-aware; tiny `n` → sorting-network micro-kernel; adversarial → `introsort`."
 - A pluggable **ML-backed selector** (Python) can replace it later without touching callers.
 - `SortPlan` = chosen strategy id + `FeedMode` + parallelism degree + chunk size + an ordered **fallback chain** (guarantees correctness if the first choice can't run).
 

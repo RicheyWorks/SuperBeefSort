@@ -16,12 +16,16 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
 
     private static final int HISTOGRAM_BUCKETS = 16;
     private static final long COUNTING_RANGE_CAP = 1L << 24;
+    /** At or below this size an exact merge-count is cheap, so we always compute inversions exactly. */
+    private static final int INVERSION_EXACT_MAX = 1 << 13; // 8192
+    /** Strided sample size for the inversion estimate on larger SHALLOW inputs. */
+    private static final int INVERSION_SAMPLE = 1 << 11;    // 2048
 
     @Override
     public DataProfile profile(SortBuffer<K> b, ProfileDepth depth) {
         int n = b.size();
         if (n < 2) {
-            return new DataProfile(n, 1.0, false, depth, n, null, Distribution.UNKNOWN, n);
+            return new DataProfile(n, 1.0, false, depth, n, null, Distribution.UNKNOWN, n, 0L, true);
         }
 
         long inOrder = 0;
@@ -47,6 +51,13 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
         }
         double ratio = (double) inOrder / pairs;
 
+        // Global disorder: exact for small/DEEP inputs, a strided-sample estimate otherwise. Uses the
+        // raw comparator (like monotonic() below), so it never inflates the metered buffer counters.
+        boolean invExact = depth == ProfileDepth.DEEP || n <= INVERSION_EXACT_MAX;
+        long inversions = invExact
+                ? countInversionsExact(b, n)
+                : estimateInversions(b, n, INVERSION_SAMPLE);
+
         KeyEncoder<K> encoder = b.keyEncoder();
         if (encoder == null) {
             Hll hll = new Hll();
@@ -54,7 +65,7 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
                 K v = b.get(i);
                 hll.add(mix(v == null ? 0L : v.hashCode()));
             }
-            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun);
+            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun, inversions, invExact);
         }
 
         long[] keys = new long[n];
@@ -67,7 +78,7 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             for (long k : keys) {
                 hll.add(mix(k));
             }
-            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun);
+            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun, inversions, invExact);
         }
 
         long min = Long.MAX_VALUE;
@@ -103,7 +114,7 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             distribution = classify(histogram, n);
         }
 
-        return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), keyStats, distribution, longestRun);
+        return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), keyStats, distribution, longestRun, inversions, invExact);
     }
 
     /** Sample adjacent pairs and confirm the encoding agrees with the comparator's strict order. */
@@ -118,6 +129,86 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             }
         }
         return true;
+    }
+
+    /** Exact inversion count over the whole input via an O(n log n) merge-count. */
+    private long countInversionsExact(SortBuffer<K> b, int n) {
+        Object[] a = new Object[n];
+        for (int i = 0; i < n; i++) {
+            a[i] = b.get(i);
+        }
+        return mergeCount(a, new Object[n], b.comparator());
+    }
+
+    /**
+     * Estimate inversions from an order-preserving strided sample of {@code m} positions. Each pair
+     * survives sub-sampling with probability {@code C(m,2)/C(n,2)}, so the sample's exact inversion
+     * count scaled by {@code C(n,2)/C(m,2)} is an unbiased estimator of the total. Cheap (O(m log m))
+     * but blind to disorder finer than the stride -- which is why small/DEEP inputs are counted exactly.
+     */
+    private long estimateInversions(SortBuffer<K> b, int n, int m) {
+        if (m >= n) {
+            return countInversionsExact(b, n);
+        }
+        Object[] a = new Object[m];
+        for (int k = 0; k < m; k++) {
+            int idx = (int) ((long) k * n / m); // strictly increasing for m <= n: preserves order
+            a[k] = b.get(idx);
+        }
+        long sampleInv = mergeCount(a, new Object[m], b.comparator());
+        double maxSamplePairs = (double) m * (m - 1) / 2.0;
+        double maxInv = (double) n * (n - 1) / 2.0;
+        if (maxSamplePairs <= 0.0) {
+            return 0L;
+        }
+        return Math.round(sampleInv / maxSamplePairs * maxInv);
+    }
+
+    /**
+     * Bottom-up (iterative) merge sort that counts strict inversions; iterative to avoid the deep
+     * recursion a worst-case input could otherwise drive. Ties are not inversions (matches
+     * {@code sortednessRatio}'s {@code c <= 0} ordering). {@code a} and {@code tmp} are ping-ponged;
+     * only the count is returned, so the final sorted location does not matter.
+     */
+    private static long mergeCount(Object[] a, Object[] tmp, Comparator<?> cmpRaw) {
+        @SuppressWarnings("unchecked")
+        Comparator<Object> cmp = (Comparator<Object>) cmpRaw;
+        int n = a.length;
+        long inversions = 0;
+        for (int width = 1; width < n; width <<= 1) {
+            for (int lo = 0; lo < n; lo += (width << 1)) {
+                int mid = Math.min(lo + width, n);
+                int hi = Math.min(lo + (width << 1), n);
+                inversions += mergeRun(a, tmp, lo, mid, hi, cmp);
+            }
+            Object[] swap = a;
+            a = tmp;
+            tmp = swap;
+        }
+        return inversions;
+    }
+
+    /** Merge {@code [lo,mid)} and {@code [mid,hi)} from {@code src} into {@code dst}, counting inversions. */
+    private static long mergeRun(Object[] src, Object[] dst, int lo, int mid, int hi, Comparator<Object> cmp) {
+        int i = lo;
+        int j = mid;
+        int k = lo;
+        long inv = 0;
+        while (i < mid && j < hi) {
+            if (cmp.compare(src[i], src[j]) <= 0) {
+                dst[k++] = src[i++];          // left <= right: in order
+            } else {
+                dst[k++] = src[j++];          // right < every remaining left: (mid - i) inversions
+                inv += (mid - i);
+            }
+        }
+        while (i < mid) {
+            dst[k++] = src[i++];
+        }
+        while (j < hi) {
+            dst[k++] = src[j++];
+        }
+        return inv;
     }
 
     private static Distribution classify(int[] histogram, int n) {

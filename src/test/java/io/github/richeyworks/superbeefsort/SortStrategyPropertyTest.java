@@ -9,6 +9,7 @@ import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.QuickSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
 import net.jqwik.api.ForAll;
@@ -27,6 +28,7 @@ class SortStrategyPropertyTest {
     private static List<SortStrategy<Integer>> strategies() {
         return List.of(
                 new InsertionSortStrategy<>(),
+                new SortingNetworkStrategy<>(),
                 new MergeSortStrategy<>(),
                 new QuickSortStrategy<>(),
                 new HeapSortStrategy<>(),

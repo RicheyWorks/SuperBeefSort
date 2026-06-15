@@ -48,6 +48,12 @@ classification; `KeyEncoder<K>` carried on the buffer enables two stable non-com
 (`counting`, `radix.lsd`); selector chooses them from key stats with an introsort fallback; engine
 capability-gates them.
 
+**Branchless small-sort kernel:** `SortingNetworkStrategy` sorts tiny inputs (n <= 16) with fixed
+Batcher comparator networks (data-oblivious, branch-light); the rule-based selector now routes tiny
+inputs here instead of insertion. The networks were verified exhaustively via the 0/1 principle (all
+2^n inputs) and match the generated Batcher set; `SortingNetworkTest` plus the shared
+`SortStrategyPropertyTest` cover the Java. Registered in `BuiltinStrategyProvider`.
+
 **O(n) CSRBT bulk-build:** CSRBT gained `OrderedSet.fromSorted` / `buildFromSorted` +
 `RedBlackTree.buildBalanced` — a balanced, black-height-correct red-black tree built directly from a
 sorted distinct run (deepest level red, root black; verified across n=1..3000). SBS feeds via the new
@@ -86,7 +92,7 @@ commit is pushed.
 
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
-`BanditSelectorTest`; CSRBT: `BulkBuildTest`.
+`BanditSelectorTest`, `SortingNetworkTest`; CSRBT: `BulkBuildTest`.
 
 ## Key decisions & gotchas (read before changing things)
 

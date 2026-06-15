@@ -5,8 +5,9 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 
 ## Algorithmic frontier
 
-- **Branchless small-sort kernels** (AlphaDev-style sorting networks for n ≤ 16/32). Swap in as the
-  insertion-cutoff base case used by quick/intro/radix — every sort gets faster for free.
+- ~~**Branchless small-sort kernels**~~ — ✅ done: `SortingNetworkStrategy` (Batcher networks for n ≤ 16,
+  verified via the 0/1 principle); the rule-based selector routes tiny inputs to it. Wiring it into the
+  intro/quick recursion leaves is a follow-up.
 - **Learned sort.** Train a CDF/RMI model (via the `KeyEncoder`) to predict each element's final
   position, then a short cleanup pass. Near-linear, and the genuine "AI-discovered" angle.
 - **ips4o / glidesort** as the parallel high-throughput workhorse above introsort.

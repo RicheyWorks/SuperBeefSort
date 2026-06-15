@@ -6,16 +6,16 @@ import io.github.richeyworks.superbeefsort.profile.DataProfile;
 import io.github.richeyworks.superbeefsort.profile.KeyStats;
 import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
 import io.github.richeyworks.superbeefsort.strategy.CountingSortStrategy;
-import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
 
 /**
  * Capability/heuristic selection. Phase 1 adds the non-comparison branch: when the profiler reports
- * faithful integer key stats, pick counting sort for a bounded range, otherwise LSD radix. Tiny and
- * nearly-sorted inputs still prefer adaptive insertion. An ML-backed selector (Phase 4) can replace
+ * faithful integer key stats, pick counting sort for a bounded range, otherwise LSD radix. Tiny inputs
+ * use a fixed sorting-network kernel; nearly-sorted inputs prefer run-aware TimSort. An ML-backed selector (Phase 4) can replace
  * this behind {@link StrategySelector} with no caller changes. Every plan carries an introsort fallback.
  */
 public final class RuleBasedStrategySelector implements StrategySelector {
@@ -34,7 +34,7 @@ public final class RuleBasedStrategySelector implements StrategySelector {
 
     private SortPlan smart(DataProfile p, StrategyId fallback) {
         if (p.tiny()) {
-            return new SortPlan(InsertionSortStrategy.ID, FeedMode.BULK, fallback, "tiny input -> insertion");
+            return new SortPlan(SortingNetworkStrategy.ID, FeedMode.BULK, fallback, "tiny input -> sorting network");
         }
         if (p.nearlySorted()) {
             // Adjacency sortedness is high, but a few far-displaced elements can still mean many

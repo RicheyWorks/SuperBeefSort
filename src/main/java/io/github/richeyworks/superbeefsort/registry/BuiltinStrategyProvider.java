@@ -6,6 +6,7 @@ import io.github.richeyworks.superbeefsort.strategy.HeapSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.LearnedSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.QuickSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
@@ -27,6 +28,7 @@ public final class BuiltinStrategyProvider implements StrategyProvider {
                 new IntroSortStrategy<>(),
                 new JdkSortStrategy<>(),
                 new CountingSortStrategy<>(),
-                new RadixSortStrategy<>());
+                new RadixSortStrategy<>(),
+                new LearnedSortStrategy<>());
     }
 }

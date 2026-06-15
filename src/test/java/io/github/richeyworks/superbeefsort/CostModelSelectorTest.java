@@ -38,9 +38,10 @@ class CostModelSelectorTest {
     }
 
     @Test
-    void wideRangeIntegerDataPicksRadix() {
-        // range too wide for counting (countingFeasible = false); radix (~8n) beats n log n
-        assertEquals("radix.lsd", pick(profile(50_000, 0.5, new KeyStats(0, 1L << 30, false))));
+    void wideRangeIntegerDataPicksLearnedOverRadix() {
+        // range too wide for counting (countingFeasible = false); the learned bucket sort (~5n,
+        // distribution-adaptive, range-agnostic) is cheaper than fixed-pass LSD radix (~8n) and n log n.
+        assertEquals("learned", pick(profile(50_000, 0.5, new KeyStats(0, 1L << 30, false))));
     }
 
     @Test

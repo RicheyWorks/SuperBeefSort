@@ -9,8 +9,12 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   verified via the 0/1 principle); the rule-based selector routes tiny inputs to it, and **introsort &
   3-way quicksort now use the network as their small-range base case** — every recursive sort gets the
   branchless leaf for free.
-- **Learned sort.** Train a CDF/RMI model (via the `KeyEncoder`) to predict each element's final
-  position, then a short cleanup pass. Near-linear, and the genuine "AI-discovered" angle.
+- ~~**Learned sort.**~~ — ✅ done: `LearnedSortStrategy`, a sample sort that learns its bucket boundaries
+  from the empirical CDF (quantiles of an oversampled, sorted key sample), so buckets stay balanced even
+  on skewed/clustered data where fixed equi-range bucketing collapses; each bucket is then comparator-sorted
+  (correct for any splitters). Near-linear when the model fits — verified across 7 distributions; the
+  cost-model picks it over radix for wide-range integer keys, and it's a bandit arm. (A predictive
+  RMI-with-cleanup variant remains a possible refinement.)
 - **ips4o / glidesort** as the parallel high-throughput workhorse above introsort.
 - **MSD radix** for string/byte keys; **entropy-aware radix** that picks base + pass-count from the
   profiler's distinct-count and distribution.

@@ -11,6 +11,7 @@ import io.github.richeyworks.superbeefsort.strategy.HeapSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.LearnedSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.QuickSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
@@ -185,6 +186,7 @@ public final class BanditStrategySelector implements LearningStrategySelector {
         KeyStats ks = p.keyStats();
         if (ks != null) {
             arms.add(RadixSortStrategy.ID);
+            arms.add(LearnedSortStrategy.ID);          // distribution-adaptive; any key range
             long span = ks.span();
             if (ks.countingFeasible() && span >= 0 && span <= Math.max(COUNTING_RANGE_FLOOR, 4L * p.size())) {
                 arms.add(CountingSortStrategy.ID);
@@ -213,6 +215,8 @@ public final class BanditStrategySelector implements LearningStrategySelector {
             }
             case "radix.lsd":
                 return 8.0 * n;                                  // ~8 fixed byte passes
+            case "learned":
+                return 5.0 * n;                                  // learned bucket sort: near-linear, range-agnostic
             case "insertion":
                 // True adaptive cost is O(n + inversions). Use the exact count when the profiler measured
                 // one (always the case at insertion's small candidate sizes); else a sortedness proxy.

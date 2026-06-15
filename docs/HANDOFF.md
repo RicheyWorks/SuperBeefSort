@@ -135,7 +135,8 @@ commit is pushed.
 
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
-`BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`; CSRBT: `BulkBuildTest`.
+`BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`, `DifferentialTest`, `ChaosTest`,
+`DeterministicSortTest`, `LearnedSortPropertyTest`; CSRBT: `BulkBuildTest`.
 
 **Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
 the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
@@ -154,6 +155,20 @@ pivot sequence, and thus its comparison/move counts, repeat. Default behaviour i
 `ThreadLocalRandom`). `DeterministicSortTest` covers reproducibility (same seed → identical counts),
 seed-sensitivity (different seeds → different pivot sequences; confirmed in a model: 5 seeds → 5 distinct
 counts), correctness, and the seed threading. Pairs with `ChaosTest`: adversarial runs are now repeatable.
+
+**Learned sort (`LearnedSortStrategy`, the "AI-discovered" angle):** a sample sort that <em>learns</em> its
+bucket boundaries from the data — it sorts a small oversampled key sample and takes its quantiles as the
+splitters (the empirical CDF), so buckets stay balanced even on skewed/clustered keys where fixed
+equi-range bucketing piles everything into a few buckets (model: clustered maxBucket 237 learned vs 10076
+naive). Elements are placed by binary search over the splitters (no comparisons), then each bucket is
+sorted with the real, metered comparator — correct for any splitters because an order-faithful
+`KeyEncoder` guarantees bucket i ≺ bucket i+1. Integer-key gated (capability), stable, out of place. The
+metered comparison count is a fraction of n log n when buckets balance (model: 0.06–0.31× across 7
+distributions). Registered in `BuiltinStrategyProvider`; the **cost model** picks it over LSD radix for
+wide-range integer keys (~5n vs ~8n) and it's a **bandit** arm. Correctness pinned by
+`LearnedSortPropertyTest` (jqwik bounded ints incl. negatives + a uniform/sorted/reversed/all-equal/
+clustered/skewed/dup-heavy battery); the algorithm + bounds were verified in a JS model first. Left as the
+default rule-selector choice: still counting/radix (learned is reachable via the cost-model/bandit paths).
 
 ## Key decisions & gotchas (read before changing things)
 

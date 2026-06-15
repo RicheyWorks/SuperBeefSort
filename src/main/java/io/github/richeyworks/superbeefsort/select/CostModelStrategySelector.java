@@ -9,6 +9,7 @@ import io.github.richeyworks.superbeefsort.strategy.CountingSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.LearnedSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 
@@ -23,6 +24,7 @@ import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
  *   <li>insertion (adaptive): {@code n + inversions}, considered only when the inversion count is exact</li>
  *   <li>counting (needs a faithful integer key in a bounded range): {@code n + range}</li>
  *   <li>LSD radix (needs a faithful integer key): {@code ~8 · n} (fixed byte passes)</li>
+ *   <li>learned bucket sort (needs a faithful integer key, any range): {@code ~5 · n} (near-linear)</li>
  * </ul>
  *
  * <p>This naturally reproduces the rule-based choices and improves on them where they diverge — e.g.
@@ -33,6 +35,7 @@ public final class CostModelStrategySelector implements StrategySelector {
 
     private static final double LN2 = Math.log(2);
     private static final double RADIX_PASSES = 8.0;       // signed 64-bit keys -> ~8 byte passes
+    private static final double LEARNED_PER_ITEM = 5.0;   // learned bucket sort: ~linear when buckets balance
     private static final double TIMSORT_OVERHEAD = 1.3;   // merge buffer allocations vs in-place sorts
 
     @Override
@@ -91,6 +94,14 @@ public final class CostModelStrategySelector implements StrategySelector {
                 bestId = RadixSortStrategy.ID;
                 bestCost = radixCost;
                 why = "fixed-pass LSD radix";
+            }
+            // Learned (sample) sort: distribution-adaptive, near-linear, and unconstrained by key range —
+            // so for wide-range integers it beats fixed-pass radix; bounded ranges still favour counting.
+            double learnedCost = LEARNED_PER_ITEM * n;
+            if (learnedCost < bestCost) {
+                bestId = LearnedSortStrategy.ID;
+                bestCost = learnedCost;
+                why = "learned bucket sort (~" + (int) LEARNED_PER_ITEM + "n, distribution-adaptive)";
             }
         }
 

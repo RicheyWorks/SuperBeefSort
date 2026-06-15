@@ -1,6 +1,9 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-13. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete, `./gradlew build` green.**
+Last updated: 2026-06-14. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete — plus
+opt-in cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a web step-visualizer.**
+Earlier work is `./gradlew build` green host-side; this session's selector code (`BanditStrategySelector`
++ the engine feedback hook) is static-reviewed and fuzz-traced but still needs a host-side `./gradlew build`.
 
 ## TL;DR
 
@@ -59,6 +62,22 @@ profile (`n log n` vs run-aware TimSort vs `n+range` counting vs fixed-pass radi
 e.g. linear counting over TimSort for nearly-sorted *integer* data. Wired via `BeefSort.selector(...)`;
 `RuleBasedStrategySelector` stays the default.
 
+**Self-tuning selector (opt-in):** `BanditStrategySelector` (a `LearningStrategySelector`) is a
+contextual multi-armed bandit. It buckets the profile into a context, seeds each capability-gated arm
+with the cost-model estimate as a prior, then refines from observed cost (`comparisons + moves`) via a
+guarded `observe(...)` hook added to `BeefSortEngine.sort()` — the engine reports each outcome back, so
+the selector tunes itself. It converges to the genuinely cheapest strategy per context and overrides
+the cost model where reality disagrees; non-comparison and O(n²) arms are gated exactly as the engine
+gates them; `FIXED_INTRO`/`STABLE` delegate to the rule-based selector. Reuse one instance across jobs
+so evidence accumulates — `BeefSort.selector(tuner)`.
+
+**Web step-visualizer:** `web/visualizer.html` — a single dependency-free page animating
+profile → select → sort → feed: the sort on the left (real strategy, live compares/moves), the sorted
+run building into a red-black tree on the right (rotations, recolor, an RB-validity badge), a faithful
+`SortEvent`/`TreeEvent` log, and an **Auto-tune ×200** panel that runs the bandit on measured costs and
+shows it converging per context. Pure JS/SVG, so it runs offline; the pure core is headless-tested
+(4800 sort/RB checks + bandit convergence).
+
 **Tooling:** JMH suite in `src/jmh/java` (`SortStrategyBenchmark` across data shapes, `FeedBenchmark`
 bulk vs balanced) — run `./gradlew jmh`; note `build` does NOT compile `src/jmh`, so use `jmh` /
 `compileJmhJava` to verify the benchmarks. GitHub Actions CI (`.github/workflows/ci.yml`) checks out SBS
@@ -66,8 +85,8 @@ plus a sibling CSRBT clone, builds + tests + compiles the benchmarks; green only
 commit is pushed.
 
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
-`NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`;
-CSRBT: `BulkBuildTest`.
+`NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
+`BanditSelectorTest`; CSRBT: `BulkBuildTest`.
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -88,6 +107,15 @@ CSRBT: `BulkBuildTest`.
   regress it.
 - **Sandbox file cache.** When files are overwritten via the editor, `mcp__workspace__bash` (the Linux
   mount) can show a **stale** copy. The host file tools (and `./gradlew`) are the source of truth.
+  `web/visualizer.html` in particular lagged after edits this session — commit it host-side (or re-check
+  it) so the full file is captured.
+- **Sandbox git is delete-restricted.** The mount blocks `unlink` under `.git` until file-deletion is
+  granted in Cowork; even then `git push` (network + GitHub auth + first-time `gh repo create`) is
+  host-side. Treat commits made from the sandbox as provisional until a host-side `./gradlew build`
+  confirms them.
+- **Bandit reward is pluggable.** `BanditStrategySelector` defaults to `comparisons + moves`
+  (deterministic, machine-independent). Pass `SortResult::elapsedNanos` to its constructor to tune on
+  this machine's wall-clock instead. Its arms are capability-gated like the engine, so a pick always runs.
 
 ## CSRBT facts that matter
 
@@ -126,23 +154,30 @@ CSRBT: `BulkBuildTest`.
 - **Phase 5 — observability + scale.** TypeScript step visualizer over the `SortEvent` stream;
   distributed/external sort.
 
-Quick wins if picking up cold: push host-side first (including the sibling CSRBT bulk-build commit,
-or CI stays red), then take an IDEAS "top pick" — the learned/autotuned selector or the web
-visualizer — before the heavier Phase 2 Rust kernel.
+All three IDEAS "top picks" are now done (O(n) bulk-build, self-tuning selector, web visualizer).
+Quick wins if picking up cold: push host-side first (SBS **and** the sibling CSRBT changes, or CI stays
+red), then pick a roadmap phase — Phase 3's ensemble range-sharded parallel feed is the next natural
+CSRBT-native win; Phase 2's Rust kernel is the heaviest lift. Smaller: record-and-replay in the
+visualizer, or a true inversion-count signal in the profiler.
 
 ## Repo / push status
 
-Not yet pushed. `.gitignore` excludes `build/` and `.gradle/`; the Gradle wrapper jar is committed so
-clones are buildable. Push (host-side), with the `gh` CLI:
+**Local history exists; nothing is pushed yet.** `main`, newest first: `582ae5a` docs · `6eedd41` CI ·
+`be6915d` JMH · `3cccf91` cost-model selector · `3b71bed` O(n) bulk-build · `4291a9c` Phase 0–1 — plus
+this session's self-tuning selector, web visualizer, and doc polish. `.gitignore` excludes `build/` and
+`.gradle/`; the wrapper jar is committed so clones build.
+
+**`git push` is host-side** — GitHub auth, network, and the first-time `gh repo create` all live on your
+machine, not the sandbox. Verify, then push:
 
 ```powershell
 cd C:\Users\730ri\projects\SuperBeefSort
-git init -b main
-git add .
-git commit -m "SuperBeefSort: polyglot sorting engine feeding CSRBT (Phase 0-1)"
+./gradlew build      # compile + run every test, including BanditSelectorTest
 gh repo create RicheyWorks/SuperBeefSort --public --source=. --remote=origin --push
 ```
 
-Without `gh`: create an empty `SuperBeefSort` repo on GitHub, then `git remote add origin …` and
-`git push -u origin main`.
-```
+The CI workflow checks out a sibling `RicheyWorks/CSRBT`, so **CSRBT must be committed + pushed too** or
+CI stays red. There the bulk-build is already committed (`7820d88`); commit the remaining working-tree
+bits (the `OrderedSet` resync trim, `docs/ADR-014`, the essay) and push that repo as well.
+
+Without `gh`: create the repos on GitHub, then `git remote add origin …` and `git push -u origin main`.

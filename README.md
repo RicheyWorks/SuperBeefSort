@@ -16,7 +16,7 @@ It's not a sorting library — it's an engine: **profile → select → sort →
 pluggable. Java is the spine; Rust kernels, a Python intelligence service, and a web visualizer are
 later phases, all optional accelerators behind the same interfaces.
 
-**Docs:** [architecture & design](docs/ARCHITECTURE.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md)
+**Docs:** [architecture & design](docs/ARCHITECTURE.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md) · [step visualizer](web/visualizer.html)
 
 ## Status
 
@@ -26,7 +26,8 @@ later phases, all optional accelerators behind the same interfaces.
 | 1 | Intelligence: HyperLogLog profiler, integer key stats + distribution, counting/LSD-radix sorts, capability-gated selection | ✅ done |
 | 2 | Rust radix kernel via Panama FFM (Java fallback retained) | planned |
 | 3 | Ensemble range-sharded feeding + streaming/backpressure | planned |
-| 4–5 | Python ML selection · web visualizer · distributed | planned |
+| 4–5 | Python ML selection · distributed / external sort | planned |
+| ✦ | **Shipped extras:** opt-in cost-model + self-tuning (bandit) selectors · JMH suite · CI · web step-visualizer | ✅ done |
 
 ## Build & test
 
@@ -42,6 +43,10 @@ cd SuperBeefSort
 ./gradlew run        # demo: live pipeline trace + CSRBT order statistics
 ./gradlew jmh        # JMH benchmarks: strategies by data shape + bulk vs balanced feed
 ```
+
+Then open **`web/visualizer.html`** in any browser for the step-by-step visualizer — profile → select →
+sort → feed into a live red-black tree, with an **Auto-tune** panel that learns the cheapest strategy
+per data shape from measured cost. No build step; pure HTML/JS/SVG.
 
 ## Quick start
 
@@ -73,7 +78,7 @@ One pipeline, every stage pluggable:
 | Stage | Component | Behavior |
 |-------|-----------|----------|
 | Profile | `IntelligentDataProfiler` | sortedness, distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
-| Select | `RuleBasedStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback |
+| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; the bandit learns the cheapest per context from observed cost |
 | Sort | `SortStrategy` via `StrategyRegistry` (SPI) | insertion · merge · 3-way quick · heap · intro · JDK · counting · LSD radix |
 | Feed | `SortFeeder` + `CsrbtTarget` | `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `DirectFeeder` |
 
@@ -101,13 +106,16 @@ discovered on the classpath. The core never changes.
 src/main/java/io/github/richeyworks/superbeefsort/
 ├── core/      SortStrategy, SortBuffer (metered), KeyEncoder, SortContext, SortObserver, SortEvent
 ├── profile/   IntelligentDataProfiler, Hll, DataProfile, KeyStats, Distribution
-├── select/    StrategySelector, RuleBasedStrategySelector, SortPlan, SelectionPolicy
+├── select/    StrategySelector · RuleBasedStrategySelector · CostModelStrategySelector · BanditStrategySelector (+ LearningStrategySelector) · SortPlan · SelectionPolicy
 ├── strategy/  Insertion · Merge · Quick (3-way) · Heap · Intro · JDK · Counting · Radix
 ├── registry/  StrategyRegistry, StrategyProvider (SPI), BuiltinStrategyProvider
 ├── feed/      CsrbtTarget, FeedMode, BalancedBuildFeeder, HealthGatedFeeder, DirectFeeder
 ├── engine/    BeefSortEngine, JobSpec, SortRunResult
 └── BeefSort   fluent facade
 ```
+
+Alongside `src/main`: `src/jmh/java/…/bench/` (JMH benchmarks), `src/test/java/…/` (JUnit + jqwik
+suite), and `web/visualizer.html` (the dependency-free step-visualizer).
 
 ## License
 

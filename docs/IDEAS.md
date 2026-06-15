@@ -72,5 +72,8 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 If you do only three, do the ones that hit the unique integration, the AI angle, and the wow-factor:
 
 1. ~~**CSRBT `fromSorted` bulk-build**~~ — ✅ done: true O(n) build via `OrderedSet.fromSorted` + `BulkBuildFeeder`.
-2. **Learned / autotuned selector** — the engine that improves itself.
-3. **Web visualizer** — watch a sort flow straight into a self-balancing tree.
+2. ~~**Learned / autotuned selector**~~ — ✅ done: `BanditStrategySelector`, a contextual UCB bandit
+   seeded with cost-model priors and refined by observed cost, behind `StrategySelector` / the new
+   `LearningStrategySelector` feedback seam.
+3. ~~**Web visualizer**~~ — ✅ done: `web/visualizer.html` — profile→select→sort→feed step-by-step into
+   a live red-black tree, with an auto-tune panel that watches the bandit learn from measured cost.

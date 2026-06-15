@@ -1,0 +1,119 @@
+<svg viewBox="0 0 1120 480" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Roboto, system-ui, sans-serif">
+<rect x="0" y="0" width="1120" height="480" fill="#0d1117"/>
+<text x="30" y="38" font-size="20" font-weight="700" fill="#e6edf3">Performance characteristics — measured from the verified implementations</text>
+<text x="30" y="58" font-size="12.5" fill="#5a6675">Real numbers from the JS feeder and the Batcher networks (the same code the tests check).</text>
+<rect x="30" y="76" width="510" height="372" rx="12" fill="#10161f" stroke="#243140"/>
+<text x="52" y="104" font-size="13.5" font-weight="650" fill="#cdd6e0">Feed-mode rotations into CSRBT vs n</text>
+<line x1="95" y1="400.0" x2="520" y2="400.0" stroke="#1a2330" stroke-width="1"/>
+<text x="87" y="404.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">0</text>
+<line x1="95" y1="350.0" x2="520" y2="350.0" stroke="#1a2330" stroke-width="1"/>
+<text x="87" y="354.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">100</text>
+<line x1="95" y1="300.0" x2="520" y2="300.0" stroke="#1a2330" stroke-width="1"/>
+<text x="87" y="304.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">200</text>
+<line x1="95" y1="250.0" x2="520" y2="250.0" stroke="#1a2330" stroke-width="1"/>
+<text x="87" y="254.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">300</text>
+<line x1="95" y1="200.0" x2="520" y2="200.0" stroke="#1a2330" stroke-width="1"/>
+<text x="87" y="204.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">400</text>
+<line x1="95" y1="150.0" x2="520" y2="150.0" stroke="#1a2330" stroke-width="1"/>
+<text x="87" y="154.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">500</text>
+<line x1="95" y1="150" x2="95" y2="400" stroke="#2b3a4d" stroke-width="1.3"/>
+<line x1="95" y1="400" x2="520" y2="400" stroke="#2b3a4d" stroke-width="1.3"/>
+<text x="95.0" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">7</text>
+<text x="165.8" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">15</text>
+<text x="236.7" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">31</text>
+<text x="307.5" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">63</text>
+<text x="378.3" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">127</text>
+<text x="449.2" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">255</text>
+<text x="520.0" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">511</text>
+<text x="308" y="434" font-size="10.5" fill="#5a6675" text-anchor="middle">n (sorted distinct keys)</text>
+<polyline points="95.0,398.5 165.8,395.5 236.7,388.5 307.5,373.5 378.3,342.5 449.2,279.5 520.0,152.5" fill="none" stroke="#e5534b" stroke-width="2.4"/>
+<circle cx="95.0" cy="398.5" r="3" fill="#e5534b"/>
+<circle cx="165.8" cy="395.5" r="3" fill="#e5534b"/>
+<circle cx="236.7" cy="388.5" r="3" fill="#e5534b"/>
+<circle cx="307.5" cy="373.5" r="3" fill="#e5534b"/>
+<circle cx="378.3" cy="342.5" r="3" fill="#e5534b"/>
+<circle cx="449.2" cy="279.5" r="3" fill="#e5534b"/>
+<circle cx="520.0" cy="152.5" r="3" fill="#e5534b"/>
+<rect x="315" y="167" width="11" height="11" rx="2" fill="#e5534b"/>
+<text x="331" y="176" font-size="11" fill="#9aa7b6" font-family="monospace">DIRECT  (ascending insert)</text>
+<polyline points="95.0,399.5 165.8,397.5 236.7,393.0 307.5,383.0 378.3,361.0 449.2,316.5 520.0,227.5" fill="none" stroke="#d6a14a" stroke-width="2.4"/>
+<circle cx="95.0" cy="399.5" r="3" fill="#d6a14a"/>
+<circle cx="165.8" cy="397.5" r="3" fill="#d6a14a"/>
+<circle cx="236.7" cy="393.0" r="3" fill="#d6a14a"/>
+<circle cx="307.5" cy="383.0" r="3" fill="#d6a14a"/>
+<circle cx="378.3" cy="361.0" r="3" fill="#d6a14a"/>
+<circle cx="449.2" cy="316.5" r="3" fill="#d6a14a"/>
+<circle cx="520.0" cy="227.5" r="3" fill="#d6a14a"/>
+<rect x="315" y="187" width="11" height="11" rx="2" fill="#d6a14a"/>
+<text x="331" y="196" font-size="11" fill="#9aa7b6" font-family="monospace">BALANCED  (median-first)</text>
+<polyline points="95.0,400.0 165.8,400.0 236.7,400.0 307.5,400.0 378.3,400.0 449.2,400.0 520.0,400.0" fill="none" stroke="#1d9e75" stroke-width="2.4"/>
+<circle cx="95.0" cy="400.0" r="3" fill="#1d9e75"/>
+<circle cx="165.8" cy="400.0" r="3" fill="#1d9e75"/>
+<circle cx="236.7" cy="400.0" r="3" fill="#1d9e75"/>
+<circle cx="307.5" cy="400.0" r="3" fill="#1d9e75"/>
+<circle cx="378.3" cy="400.0" r="3" fill="#1d9e75"/>
+<circle cx="449.2" cy="400.0" r="3" fill="#1d9e75"/>
+<circle cx="520.0" cy="400.0" r="3" fill="#1d9e75"/>
+<rect x="315" y="207" width="11" height="11" rx="2" fill="#1d9e75"/>
+<text x="331" y="216" font-size="11" fill="#9aa7b6" font-family="monospace">BULK  (O(n) build = 0)</text>
+<rect x="580" y="76" width="510" height="372" rx="12" fill="#10161f" stroke="#243140"/>
+<text x="602" y="104" font-size="13.5" font-weight="650" fill="#cdd6e0">Sorting-network comparators vs insertion worst-case</text>
+<line x1="645" y1="400.0" x2="1075" y2="400.0" stroke="#1a2330" stroke-width="1"/>
+<text x="637" y="404.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">0</text>
+<line x1="645" y1="337.5" x2="1075" y2="337.5" stroke="#1a2330" stroke-width="1"/>
+<text x="637" y="341.5" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">30</text>
+<line x1="645" y1="275.0" x2="1075" y2="275.0" stroke="#1a2330" stroke-width="1"/>
+<text x="637" y="279.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">60</text>
+<line x1="645" y1="212.5" x2="1075" y2="212.5" stroke="#1a2330" stroke-width="1"/>
+<text x="637" y="216.5" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">90</text>
+<line x1="645" y1="150.0" x2="1075" y2="150.0" stroke="#1a2330" stroke-width="1"/>
+<text x="637" y="154.0" font-size="10.5" fill="#5a6675" text-anchor="end" font-family="monospace">120</text>
+<line x1="645" y1="150" x2="645" y2="400" stroke="#2b3a4d" stroke-width="1.3"/>
+<line x1="645" y1="400" x2="1075" y2="400" stroke="#2b3a4d" stroke-width="1.3"/>
+<text x="645.0" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">2</text>
+<text x="706.4" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">4</text>
+<text x="767.9" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">6</text>
+<text x="829.3" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">8</text>
+<text x="890.7" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">10</text>
+<text x="952.1" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">12</text>
+<text x="1013.6" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">14</text>
+<text x="1075.0" y="416" font-size="10" fill="#5a6675" text-anchor="middle" font-family="monospace">16</text>
+<text x="860" y="434" font-size="10.5" fill="#5a6675" text-anchor="middle">n (small-range size)</text>
+<polyline points="645.0,397.9 675.7,393.8 706.4,387.5 737.1,379.2 767.9,368.8 798.6,356.2 829.3,341.7 860.0,325.0 890.7,306.2 921.4,285.4 952.1,262.5 982.9,237.5 1013.6,210.4 1044.3,181.2 1075.0,150.0" fill="none" stroke="#6b7787" stroke-width="2.4"/>
+<circle cx="645.0" cy="397.9" r="3" fill="#6b7787"/>
+<circle cx="675.7" cy="393.8" r="3" fill="#6b7787"/>
+<circle cx="706.4" cy="387.5" r="3" fill="#6b7787"/>
+<circle cx="737.1" cy="379.2" r="3" fill="#6b7787"/>
+<circle cx="767.9" cy="368.8" r="3" fill="#6b7787"/>
+<circle cx="798.6" cy="356.2" r="3" fill="#6b7787"/>
+<circle cx="829.3" cy="341.7" r="3" fill="#6b7787"/>
+<circle cx="860.0" cy="325.0" r="3" fill="#6b7787"/>
+<circle cx="890.7" cy="306.2" r="3" fill="#6b7787"/>
+<circle cx="921.4" cy="285.4" r="3" fill="#6b7787"/>
+<circle cx="952.1" cy="262.5" r="3" fill="#6b7787"/>
+<circle cx="982.9" cy="237.5" r="3" fill="#6b7787"/>
+<circle cx="1013.6" cy="210.4" r="3" fill="#6b7787"/>
+<circle cx="1044.3" cy="181.2" r="3" fill="#6b7787"/>
+<circle cx="1075.0" cy="150.0" r="3" fill="#6b7787"/>
+<rect x="690" y="167" width="11" height="11" rx="2" fill="#6b7787"/>
+<text x="706" y="176" font-size="11" fill="#9aa7b6" font-family="monospace">insertion worst-case  n(n-1)/2</text>
+<polyline points="645.0,397.9 675.7,393.8 706.4,389.6 737.1,381.2 767.9,375.0 798.6,366.7 829.3,360.4 860.0,341.7 890.7,333.3 921.4,320.8 952.1,312.5 982.9,300.0 1013.6,289.6 1044.3,277.1 1075.0,268.8" fill="none" stroke="#8a82ff" stroke-width="2.4"/>
+<circle cx="645.0" cy="397.9" r="3" fill="#8a82ff"/>
+<circle cx="675.7" cy="393.8" r="3" fill="#8a82ff"/>
+<circle cx="706.4" cy="389.6" r="3" fill="#8a82ff"/>
+<circle cx="737.1" cy="381.2" r="3" fill="#8a82ff"/>
+<circle cx="767.9" cy="375.0" r="3" fill="#8a82ff"/>
+<circle cx="798.6" cy="366.7" r="3" fill="#8a82ff"/>
+<circle cx="829.3" cy="360.4" r="3" fill="#8a82ff"/>
+<circle cx="860.0" cy="341.7" r="3" fill="#8a82ff"/>
+<circle cx="890.7" cy="333.3" r="3" fill="#8a82ff"/>
+<circle cx="921.4" cy="320.8" r="3" fill="#8a82ff"/>
+<circle cx="952.1" cy="312.5" r="3" fill="#8a82ff"/>
+<circle cx="982.9" cy="300.0" r="3" fill="#8a82ff"/>
+<circle cx="1013.6" cy="289.6" r="3" fill="#8a82ff"/>
+<circle cx="1044.3" cy="277.1" r="3" fill="#8a82ff"/>
+<circle cx="1075.0" cy="268.8" r="3" fill="#8a82ff"/>
+<rect x="690" y="187" width="11" height="11" rx="2" fill="#8a82ff"/>
+<text x="706" y="196" font-size="11" fill="#9aa7b6" font-family="monospace">Batcher network</text>
+<text x="30" y="468" font-size="11" fill="#5a6675">Lower is better. BULK feeding does zero rotations at any n; the network does ~half insertion's worst-case comparisons by n=16 (63 vs 120).</text>
+</svg>

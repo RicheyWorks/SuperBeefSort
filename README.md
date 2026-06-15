@@ -98,6 +98,14 @@ it and calls CSRBT's `selfRepair()` between batches.
 profiler samples the data to confirm the encoding agrees with the comparator's order; if it doesn't,
 integer stats are withheld and the engine stays on comparison sorts — never silently reordering keys.
 
+### Performance (measured)
+
+![Performance characteristics — feed-mode rotations and sorting-network comparator savings](docs/performance.svg)
+
+Straight from the verified implementations: BULK feeding does **zero** rotations at any size (vs
+DIRECT's roughly-linear growth), and the Batcher small-sort networks do about half insertion's
+worst-case comparisons by n=16 (63 vs 120).
+
 ## Adding a strategy
 
 Implement `SortStrategy<K>`, then either register it on a `StrategyRegistry` or contribute a

@@ -51,7 +51,12 @@ capability-gates them.
 **Branchless small-sort kernel:** `SortingNetworkStrategy` sorts tiny inputs (n <= 16) with fixed
 Batcher comparator networks (data-oblivious, branch-light); the rule-based selector now routes tiny
 inputs here instead of insertion, and introsort & 3-way quicksort use it as their small-range base
-case (replacing their insertion cutoff, tied to `SortingNetwork.MAX`). The networks were verified exhaustively via the 0/1 principle (all
+case (replacing their insertion cutoff, tied to `SortingNetwork.MAX`).
+
+**PrecisionFeeder (defensive feeding):** a new `FeedMode.PRECISION` / `PrecisionFeeder` inserts
+median-first but validates CSRBT health after every insert and counts duplicates explicitly
+(ARCHITECTURE sec 5.4 / 6.5) - the slowest, safest feed personality. Wired into the engine's feeder
+switch; `PrecisionFeederTest` covers it (validate-every-insert + duplicate accounting + valid tree). The networks were verified exhaustively via the 0/1 principle (all
 2^n inputs) and match the generated Batcher set; `SortingNetworkTest` plus the shared
 `SortStrategyPropertyTest` cover the Java. Registered in `BuiltinStrategyProvider`.
 

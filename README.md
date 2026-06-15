@@ -83,7 +83,7 @@ One pipeline, every stage pluggable:
 | Profile | `IntelligentDataProfiler` | sortedness, distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
 | Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; the bandit learns the cheapest per context from observed cost |
 | Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · 3-way quick · heap · intro · JDK · counting · LSD radix |
-| Feed | `SortFeeder` + `CsrbtTarget` | `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `DirectFeeder` |
+| Feed | `SortFeeder` + `CsrbtTarget` | `BulkBuildFeeder` (O(n)) · `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `PrecisionFeeder` (validate-every-insert) · `DirectFeeder` |
 
 ### Two design notes
 
@@ -127,7 +127,7 @@ src/main/java/io/github/richeyworks/superbeefsort/
 ├── select/    StrategySelector · RuleBasedStrategySelector · CostModelStrategySelector · BanditStrategySelector (+ LearningStrategySelector) · SortPlan · SelectionPolicy
 ├── strategy/  SortingNetwork · Insertion · Merge · Quick (3-way) · Heap · Intro · JDK · Counting · Radix
 ├── registry/  StrategyRegistry, StrategyProvider (SPI), BuiltinStrategyProvider
-├── feed/      CsrbtTarget, FeedMode, BalancedBuildFeeder, HealthGatedFeeder, DirectFeeder
+├── feed/      CsrbtTarget, FeedMode, BulkBuildFeeder, BalancedBuildFeeder, HealthGatedFeeder, PrecisionFeeder, DirectFeeder
 ├── engine/    BeefSortEngine, JobSpec, SortRunResult
 └── BeefSort   fluent facade
 ```

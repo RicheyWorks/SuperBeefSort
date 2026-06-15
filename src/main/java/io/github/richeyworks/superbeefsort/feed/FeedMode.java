@@ -9,5 +9,7 @@ public enum FeedMode {
     /** O(n) build via CSRBT {@code fromSorted} when the target is an empty OrderedSet; else BALANCED. */
     BULK,
     /** Balanced insertion in batches, validating/repairing tree health between batches. */
-    HEALTH_GATED
+    HEALTH_GATED,
+    /** Median-first insertion that validates CSRBT health after every insert; explicit duplicate accounting. */
+    PRECISION
 }

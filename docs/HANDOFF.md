@@ -135,7 +135,17 @@ commit is pushed.
 
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
-`BanditSelectorTest`, `SortingNetworkTest`; CSRBT: `BulkBuildTest`.
+`BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`; CSRBT: `BulkBuildTest`.
+
+**Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
+the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
+(sorted, reversed, all-equal, sawtooth, organ-pipe, few-distinct). `ChaosTest` constructs the
+Bentley–McIlroy **median-of-three killer** (an adversary comparator that keeps values "gas" until forced
+to freeze the non-pivot, so the pivot stays extreme) and proves the introsort depth guard fires: on the
+same array a plain (unguarded) median-of-three quicksort does `> n²/5` comparisons while the engine's
+introsort stays `<= 8·n·log₂n` and still sorts correctly (a >4× comparison gap). The adversary +
+bounds were cross-checked against a faithful JS model of the engine's introsort (plain ≈ n²/4, intro ≈
+3.5·n·log₂n) before pinning.
 
 ## Key decisions & gotchas (read before changing things)
 

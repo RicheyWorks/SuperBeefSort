@@ -61,9 +61,12 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 
 ## Robustness flexes
 
-- **Differential testing** of every strategy vs `Arrays.sort`; jqwik **stateful** tests of the feeder
-  against a live CSRBT.
-- **Chaos mode**: inject anti-quicksort adversarial sequences to prove the introsort fallback fires.
+- ~~**Differential testing** of every strategy vs `Arrays.sort`~~ — ✅ done: `DifferentialTest` (jqwik
+  duplicate-heavy inputs + a pathological-shape battery). jqwik **stateful** tests of the feeder against
+  a live CSRBT are still open.
+- ~~**Chaos mode**: inject anti-quicksort adversarial sequences to prove the introsort fallback fires.~~
+  — ✅ done: `ChaosTest` builds the Bentley–McIlroy median-of-three killer and proves introsort stays
+  sub-quadratic (`<= 8·n·log₂n`) where an unguarded quicksort goes `> n²/5` — the depth guard firing.
 - **Deterministic mode** (seeded pivots) for reproducible runs.
 
 ## Productization

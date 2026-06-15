@@ -139,6 +139,15 @@
   .tbar { display: block; height: 100%; background: linear-gradient(90deg, #1d9e75, #d6a14a, #d9603b); transition: width .35s; }
   .tmean { text-align: right; color: var(--ink); }
   .tpulls { text-align: right; color: var(--faint); }
+  .recbar { display: flex; align-items: center; gap: 8px; margin: 0 18px 12px; }
+  .recbar .reclbl { color: var(--faint); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+  .rectoken { flex: 1; min-width: 0; background: #0c121a; color: var(--muted); border: 1px solid var(--edge); border-radius: 6px; padding: 6px 9px; font-family: var(--mono); font-size: 11px; }
+  .recstatus { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+  .recstatus.ok { color: #5bd6ab; } .recstatus.bad { color: #ff8a82; }
+  .ostatsline { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .osel { font-family: var(--mono); font-size: 11px; color: var(--ink); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .osel input[type=range] { width: 110px; accent-color: #8a82ff; }
+  .osel b { color: #ffd27a; }
 </style>
 </head>
 <body>
@@ -202,6 +211,7 @@
     <input type="range" id="speed" min="1" max="100" value="55" step="1" />
   </div>
   <div class="btns">
+    <button class="ghost" id="newdata">&#127922; New data</button>
     <button class="ghost" id="step">Step</button>
     <button class="primary" id="run">▶ Run</button>
     <button class="ghost" id="reset">Reset</button>
@@ -228,6 +238,20 @@
       <div class="meta"><span id="treemeta">inserts 0 · rotations 0</span> &nbsp; <span class="badge" id="rbbadge">—</span></div></div>
     <div class="body"><svg id="tree" preserveAspectRatio="xMidYMid meet"></svg></div>
   </div>
+</div>
+
+<div class="recbar" id="recbar">
+  <span class="reclbl">recording</span>
+  <input id="rectoken" class="rectoken" spellcheck="false" />
+  <button class="ghost small" id="reccopy">Copy</button>
+  <button class="ghost small" id="recreplay">Replay</button>
+  <span class="recstatus" id="recstatus"></span>
+</div>
+
+<div class="recbar osbar" id="osbar">
+  <span class="reclbl">CSRBT order stats</span>
+  <span id="osline" class="ostatsline">run to build the tree, then query</span>
+  <label class="osel">select(<input type="range" id="osrank" min="1" max="1" value="1" /> <b id="osk">1</b>) = <b id="osval">—</b></label>
 </div>
 
 <div class="tuner" id="tuner">
@@ -611,7 +635,50 @@
     return bandit.snapshot(profile(generate(shape,size,seed0),intKeys));
   }
 
-  const SBSViz = { mulberry32, generate, profile, select, sorter, RBTree, validateRB, feedOrder, feeder, buildJob, selfTest, STRATS, Bandit, tuneDemo };
+  /* ---- record & replay: a run is fully determined by its config (seeded PRNG) ---- */
+  function digestOf(job){
+    const rb = validateRB(job.feed.tree);
+    return { strategy:job.strategy, feedMode:job.feedMode,
+      comparisons:job.sort.comparisons, moves:job.sort.moves, distinct:job.sortedDistinct.length,
+      inserts:job.feed.inserts, rotations:job.feed.rotations, rbValid:rb.valid, blackHeight:rb.blackHeight };
+  }
+  function digestEquals(a,b){
+    if(!a||!b) return false;
+    return ["strategy","feedMode","comparisons","moves","distinct","inserts","rotations","rbValid","blackHeight"]
+      .every(k=>a[k]===b[k]);
+  }
+  function recordOf(opts){                                   // {config, digest} — strat is pinned to what ran
+    const job = buildJob(opts);
+    return { v:1, config:{ shape:opts.shape, size:opts.size, intKeys:!!opts.intKeys,
+      policy:opts.policy||"SMART", strat:job.strategy, feed:opts.feedOverride||"auto",
+      seed:opts.seed==null?12345:opts.seed }, digest: digestOf(job) };
+  }
+  function replayDigest(config){                             // rebuild from a config and return its digest
+    return digestOf(buildJob({ shape:config.shape, size:config.size, intKeys:config.intKeys,
+      policy:config.policy, stratOverride:config.strat, feedOverride:config.feed, seed:config.seed }));
+  }
+  function encodeRun(rec){ return "SBS1." + btoa(JSON.stringify(rec)); }
+  function decodeRun(token){ return JSON.parse(atob(String(token).trim().replace(/^SBS1\./,""))); }
+
+  /* ---- CSRBT order statistics over the built tree (the payoff of feeding a sorted run) ----
+     Subtree sizes are computed in one pass on the (now static) tree, then select/rank are O(log n),
+     exactly the queries CSRBT's RankedSet exposes (select 1-indexed, rank, min/max/median/percentile). */
+  function orderStats(tree){
+    const NIL = tree.NIL;
+    (function sz(x){ if(x===NIL) return 0; x.size = 1 + sz(x.left) + sz(x.right); return x.size; })(tree.root);
+    const n = tree.root===NIL ? 0 : tree.root.size;
+    const lsize = x => x.left===NIL ? 0 : x.left.size;
+    function nodeAtRank(k){ if(k<1||k>n) return null; let x=tree.root; while(x!==NIL){ const ls=lsize(x); if(k===ls+1) return x; if(k<=ls) x=x.left; else { k-=ls+1; x=x.right; } } return null; }
+    function select(k){ const node=nodeAtRank(k); return node?node.key:null; }            // 1-indexed
+    function rank(key){ let x=tree.root, r=0; while(x!==NIL){ if(key<x.key) x=x.left; else { r+=lsize(x)+1; x=x.right; } } return r; } // # keys <= key
+    const min = ()=> select(1), max = ()=> select(n);
+    const median = ()=> n ? select(Math.floor((n+1)/2)) : null;                            // lower median, matches CSRBT
+    const percentile = p => n ? select(Math.max(1, Math.min(n, Math.ceil(p/100*n)))) : null;
+    const countInRange = (lo,hi)=> rank(hi) - rank(lo-1);                                   // integer keys
+    return { n, select, rank, nodeAtRank, min, max, median, percentile, countInRange };
+  }
+
+  const SBSViz = { mulberry32, generate, profile, select, sorter, RBTree, validateRB, feedOrder, feeder, buildJob, selfTest, STRATS, Bandit, tuneDemo, digestOf, digestEquals, recordOf, replayDigest, encodeRun, decodeRun, orderStats };
   global.SBSViz = SBSViz;
 
   /* ============================ DOM layer ============================ */
@@ -628,12 +695,15 @@
     bars:$("bars"), tree:$("tree"), log:$("log"), sortmeta:$("sortmeta"), treemeta:$("treemeta"), rbbadge:$("rbbadge"),
     stProfile:$("st-profile"), stSelect:$("st-select"), stSort:$("st-sort"), stFeed:$("st-feed"),
     tune:$("tune"), tunerbody:$("tunerbody"),
+    newdata:$("newdata"), rectoken:$("rectoken"), reccopy:$("reccopy"), recreplay:$("recreplay"), recstatus:$("recstatus"),
+    osline:$("osline"), osrank:$("osrank"), osk:$("osk"), osval:$("osval"),
   };
 
   let job=null, timeline=[], tlIdx=0, playing=false, timer=null;
   let bars=[], barState=[], cmpC=0, moveC=0;
   let liveTree=null, insC=0, rotC=0;
   const bandit = SBSViz.Bandit();
+  let currentSeed = 12345;
 
   function stageActive(name){
     document.querySelectorAll(".stage").forEach(s=>s.classList.toggle("active", s.dataset.stage===name));
@@ -729,6 +799,23 @@
   function flashAll(){ ui.tree.querySelectorAll("g.node").forEach(g=>{ g.classList.add("flash"); setTimeout(()=>g.classList.remove("flash"),260); }); }
 
   /* ---------- build the timeline from a job ---------- */
+  let ostatsCur = null;
+  function showOrderStats(){
+    if(!liveTree){ return; }
+    ostatsCur = SBSViz.orderStats(liveTree);
+    const os=ostatsCur, n=os.n, f=v=>v==null?"—":v;
+    ui.osrank.max = Math.max(1,n); if(+ui.osrank.value>n) ui.osrank.value=1;
+    ui.osline.textContent = n ? `n=${n} · min ${f(os.min())} · median ${f(os.median())} · max ${f(os.max())} · p90 ${f(os.percentile(90))}` : "empty tree";
+    updateSelect();
+  }
+  function updateSelect(){
+    if(!ostatsCur){ return; }
+    const k=+ui.osrank.value; ui.osk.textContent=k;
+    const node=ostatsCur.nodeAtRank(k);
+    ui.osval.textContent = node?node.key:"—";
+    renderTree(node?node.key:null);   // pulse the node CSRBT would return for select(k)
+  }
+
   function renderBandit(profile){
     const snap=bandit.snapshot(profile);
     const maxMean=Math.max.apply(null, snap.arms.map(a=>a.mean).concat(1));
@@ -746,12 +833,12 @@
     const policy=ui.policy.value, shape=ui.shape.value, size=+ui.size.value, intKeys=ui.intkeys.checked;
     let stratOverride=ui.strat.value, banditReason=null;
     if(policy==="BANDIT" && stratOverride==="auto"){
-      const pp=SBSViz.profile(SBSViz.generate(shape,size,12345), intKeys);
+      const pp=SBSViz.profile(SBSViz.generate(shape,size,currentSeed), intKeys);
       stratOverride=bandit.select(pp);
       const arm=bandit.snapshot(pp).arms.find(a=>a.id===stratOverride);
       banditReason=`self-tuning bandit → ${stratOverride} (${arm.pulls>1?arm.pulls+" pulls observed":"on prior, not yet tuned"})`;
     }
-    const o={ shape, size, intKeys, policy: policy==="BANDIT"?"SMART":policy, stratOverride, feedOverride:ui.feed.value, seed:12345 };
+    const o={ shape, size, intKeys, policy: policy==="BANDIT"?"SMART":policy, stratOverride, feedOverride:ui.feed.value, seed:currentSeed };
     job=buildJob(o);
     // reset visuals
     barState=job.input.map(v=>({v, s:"idle", done:false})); cmpC=0; moveC=0; layoutBars();
@@ -781,6 +868,9 @@
     ui.stSort.innerHTML=`—<br><small>pending</small>`;
     ui.stFeed.innerHTML=`${job.feedMode}<br><small>pending</small>`;
     renderBandit(job.profile);
+    ui.rectoken.value = SBSViz.encodeRun({ v:1, config:{ shape, size, intKeys, policy, strat:job.strategy, feed:ui.feed.value, seed:currentSeed }, digest: SBSViz.digestOf(job) });
+    ui.recstatus.textContent = "";
+    ostatsCur=null; ui.osline.textContent="run to build the tree, then query"; ui.osval.textContent="—"; ui.osrank.max=1; ui.osrank.value=1; ui.osk.textContent="1";
   }
 
   function advance(){
@@ -793,6 +883,7 @@
       if(item.t==="SORT_COMPLETED") ui.stSort.innerHTML=`${job.sort.comparisons} cmp · ${job.sort.moves} mv<br><small>${job.strategy}</small>`;
       if(item.t==="FEED_COMPLETED") ui.stFeed.innerHTML=`${job.feedMode}<br><small>${job.feed.inserts} keys · ${job.feed.rotations} rot</small>`;
       if(item.t==="JOB_COMPLETED" && ui.policy.value==="BANDIT"){ bandit.observe(job.profile, job.strategy, job.sort.comparisons+job.sort.moves); logEv("ev-life","[autotune]", `observed ${job.strategy} cost ${job.sort.comparisons+job.sort.moves} → bandit updated`); renderBandit(job.profile); }
+      if(item.t==="JOB_COMPLETED") showOrderStats();
     } else if(item.k==="sort"){ stageActive("sort"); applySortStep(item.s); }
     else if(item.k==="feed"){ stageActive("feed"); applyFeedStep(item.s); }
     else if(item.k==="validate"){
@@ -817,8 +908,22 @@
   ui.tune.addEventListener("click", ()=>{
     const snap=SBSViz.tuneDemo(bandit, ui.shape.value, +ui.size.value, ui.intkeys.checked, 200);
     logEv("ev-life","[autotune ×200]", `context ${snap.context} → bandit now prefers ${snap.pick}`);
-    renderBandit(SBSViz.profile(SBSViz.generate(ui.shape.value,+ui.size.value,12345), ui.intkeys.checked));
+    renderBandit(SBSViz.profile(SBSViz.generate(ui.shape.value,+ui.size.value,currentSeed), ui.intkeys.checked));
   });
+  ui.newdata.addEventListener("click", ()=>{ currentSeed=(Math.random()*1e9)>>>0; reset(); });
+  ui.reccopy.addEventListener("click", ()=>{ try{ navigator.clipboard && navigator.clipboard.writeText(ui.rectoken.value); }catch(e){} ui.recstatus.textContent="copied"; ui.recstatus.className="recstatus ok"; });
+  ui.recreplay.addEventListener("click", ()=>{
+    let rec; try { rec=SBSViz.decodeRun(ui.rectoken.value); } catch(e){ ui.recstatus.textContent="✗ bad token"; ui.recstatus.className="recstatus bad"; return; }
+    const c=rec.config;
+    ui.shape.value=c.shape; ui.size.value=c.size; ui.sizeval.textContent=c.size; ui.intkeys.checked=!!c.intKeys;
+    ui.policy.value=c.policy; ui.strat.value=c.strat; ui.feed.value=c.feed; currentSeed=c.seed;
+    reset();
+    const ok=SBSViz.digestEquals(rec.digest, SBSViz.digestOf(job));
+    ui.recstatus.textContent = ok ? "✓ reproduced exactly" : "✗ digest mismatch";
+    ui.recstatus.className = "recstatus " + (ok?"ok":"bad");
+    play();
+  });
+  ui.osrank.addEventListener("input", updateSelect);
 
   // boot
   reset();

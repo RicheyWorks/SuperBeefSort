@@ -45,8 +45,9 @@ cd SuperBeefSort
 ```
 
 Then open **`web/visualizer.html`** in any browser for the step-by-step visualizer — profile → select →
-sort → feed into a live red-black tree, with an **Auto-tune** panel that learns the cheapest strategy
-per data shape from measured cost. No build step; pure HTML/JS/SVG.
+sort → feed into a live red-black tree, with an **Auto-tune** panel that learns the cheapest
+strategy per data shape, **record/replay** tokens to reproduce an exact run, and a live **CSRBT
+order-statistics** explorer (select / rank / median) on the built tree. No build step; pure HTML/JS/SVG.
 
 ## Quick start
 

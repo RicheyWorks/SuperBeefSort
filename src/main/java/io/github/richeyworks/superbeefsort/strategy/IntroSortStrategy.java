@@ -8,13 +8,13 @@ import io.github.richeyworks.superbeefsort.core.StrategyId;
 
 /**
  * Introsort: median-of-three quicksort with a recursion-depth guard that falls back to heapsort,
- * plus an insertion-sort cutoff. Guarantees O(n log n) worst case while keeping quicksort's speed —
+ * plus a sorting-network cutoff for small ranges. Guarantees O(n log n) worst case while keeping quicksort's speed —
  * the robust general-purpose default and the fallback for every other strategy.
  */
 public final class IntroSortStrategy<K> implements SortStrategy<K> {
 
     public static final StrategyId ID = StrategyId.of("intro");
-    private static final int CUTOFF = 16;
+    private static final int CUTOFF = SortingNetwork.MAX;
 
     @Override
     public void sort(SortBuffer<K> b, SortContext context) {
@@ -52,7 +52,7 @@ public final class IntroSortStrategy<K> implements SortStrategy<K> {
             introsort(b, lo, lt - 1, depth);
             lo = gt + 1;
         }
-        insertion(b, lo, hi);
+        SortingNetwork.sort(b, lo, hi - lo + 1); // small range: branchless comparator network
     }
 
     /** Index of the median-valued of the three positions {@code x}, {@code y}, {@code z}. */
@@ -96,19 +96,6 @@ public final class IntroSortStrategy<K> implements SortStrategy<K> {
             } else {
                 break;
             }
-        }
-    }
-
-    private void insertion(SortBuffer<K> b, int lo, int hi) {
-        for (int i = lo + 1; i <= hi; i++) {
-            K key = b.get(i);
-            int j = i - 1;
-            while (j >= lo && b.compareToKey(j, key) > 0) {
-                b.set(j + 1, b.get(j));
-                b.recordMove();
-                j--;
-            }
-            b.set(j + 1, key);
         }
     }
 

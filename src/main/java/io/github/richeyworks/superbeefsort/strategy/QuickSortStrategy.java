@@ -9,14 +9,14 @@ import io.github.richeyworks.superbeefsort.core.StrategyId;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Three-way (Dutch-national-flag) quicksort with a randomized pivot and an insertion-sort cutoff.
+ * Three-way (Dutch-national-flag) quicksort with a randomized pivot and a sorting-network cutoff.
  * The three-way partition makes it resilient to inputs with many duplicate keys, and recursing on
  * the smaller side bounds stack depth to O(log n).
  */
 public final class QuickSortStrategy<K> implements SortStrategy<K> {
 
     public static final StrategyId ID = StrategyId.of("quick.threeway");
-    private static final int INSERTION_CUTOFF = 16;
+    private static final int INSERTION_CUTOFF = SortingNetwork.MAX;
 
     @Override
     public void sort(SortBuffer<K> b, SortContext context) {
@@ -26,7 +26,7 @@ public final class QuickSortStrategy<K> implements SortStrategy<K> {
     private void quicksort(SortBuffer<K> b, int lo, int hi) {
         while (lo < hi) {
             if (hi - lo < INSERTION_CUTOFF) {
-                insertion(b, lo, hi);
+                SortingNetwork.sort(b, lo, hi - lo + 1); // small range: branchless comparator network
                 return;
             }
             int p = lo + ThreadLocalRandom.current().nextInt(hi - lo + 1);
@@ -52,19 +52,6 @@ public final class QuickSortStrategy<K> implements SortStrategy<K> {
                 quicksort(b, gt + 1, hi);
                 hi = lt - 1;
             }
-        }
-    }
-
-    private void insertion(SortBuffer<K> b, int lo, int hi) {
-        for (int i = lo + 1; i <= hi; i++) {
-            K key = b.get(i);
-            int j = i - 1;
-            while (j >= lo && b.compareToKey(j, key) > 0) {
-                b.set(j + 1, b.get(j));
-                b.recordMove();
-                j--;
-            }
-            b.set(j + 1, key);
         }
     }
 

@@ -50,7 +50,8 @@ capability-gates them.
 
 **Branchless small-sort kernel:** `SortingNetworkStrategy` sorts tiny inputs (n <= 16) with fixed
 Batcher comparator networks (data-oblivious, branch-light); the rule-based selector now routes tiny
-inputs here instead of insertion. The networks were verified exhaustively via the 0/1 principle (all
+inputs here instead of insertion, and introsort & 3-way quicksort use it as their small-range base
+case (replacing their insertion cutoff, tied to `SortingNetwork.MAX`). The networks were verified exhaustively via the 0/1 principle (all
 2^n inputs) and match the generated Batcher set; `SortingNetworkTest` plus the shared
 `SortStrategyPropertyTest` cover the Java. Registered in `BuiltinStrategyProvider`.
 

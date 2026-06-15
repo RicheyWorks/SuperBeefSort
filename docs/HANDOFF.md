@@ -56,7 +56,12 @@ case (replacing their insertion cutoff, tied to `SortingNetwork.MAX`).
 **PrecisionFeeder (defensive feeding):** a new `FeedMode.PRECISION` / `PrecisionFeeder` inserts
 median-first but validates CSRBT health after every insert and counts duplicates explicitly
 (ARCHITECTURE sec 5.4 / 6.5) - the slowest, safest feed personality. Wired into the engine's feeder
-switch; `PrecisionFeederTest` covers it (validate-every-insert + duplicate accounting + valid tree). The networks were verified exhaustively via the 0/1 principle (all
+switch; `PrecisionFeederTest` covers it (validate-every-insert + duplicate accounting + valid tree).
+
+**SortReport (observability):** `engine/SortReport` flattens a `SortRunResult` into a one-line
+dashboard - strategy, comparisons/moves, sort + feed time, inserted/duplicates, health, and end-to-end
+items/s (ARCHITECTURE sec 5.7). Build it with `SortReport.of(run)`; `SortReportTest` covers a
+sort-and-feed job and a sort-only job. The networks were verified exhaustively via the 0/1 principle (all
 2^n inputs) and match the generated Batcher set; `SortingNetworkTest` plus the shared
 `SortStrategyPropertyTest` cover the Java. Registered in `BuiltinStrategyProvider`.
 

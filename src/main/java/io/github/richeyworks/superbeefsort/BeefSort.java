@@ -14,6 +14,7 @@ import io.github.richeyworks.superbeefsort.select.StrategySelector;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.OptionalLong;
 
 /**
  * Fluent front door to SuperBeefSort. Supplying a {@link KeyEncoder} lets the engine choose
@@ -37,6 +38,7 @@ public final class BeefSort<K> {
     private SortObserver observer = SortObserver.NOOP;
     private KeyEncoder<K> keyEncoder; // null -> comparison sorts only
     private StrategySelector selector; // null -> engine default (rule-based)
+    private OptionalLong randomSeed = OptionalLong.empty(); // present -> deterministic, reproducible runs
 
     private BeefSort(Comparator<? super K> comparator) {
         this.comparator = comparator;
@@ -78,6 +80,12 @@ public final class BeefSort<K> {
         return this;
     }
 
+    /** Deterministic mode: randomized strategies (e.g. quicksort's pivot) seed from {@code seed}, so the run is reproducible. */
+    public BeefSort<K> deterministic(long seed) {
+        this.randomSeed = OptionalLong.of(seed);
+        return this;
+    }
+
     /** Sort only. */
     public SortRunResult<K> run() {
         return engine().sort(source, comparator, spec());
@@ -101,6 +109,12 @@ public final class BeefSort<K> {
 
     private JobSpec spec() {
         JobSpec s = JobSpec.defaults().withPolicy(policy).withObserver(observer);
-        return feedMode == null ? s : s.withFeedMode(feedMode);
+        if (feedMode != null) {
+            s = s.withFeedMode(feedMode);
+        }
+        if (randomSeed.isPresent()) {
+            s = s.withRandomSeed(randomSeed.getAsLong());
+        }
+        return s;
     }
 }

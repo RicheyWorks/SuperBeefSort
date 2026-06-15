@@ -88,7 +88,7 @@ public final class BeefSortEngine<K> {
         long beforeComparisons = buffer.comparisons();
         long beforeMoves = buffer.moves();
         long t0 = System.nanoTime();
-        strategy.sort(buffer, new SortContext(obs));
+        strategy.sort(buffer, new SortContext(obs, spec.randomSeed()));
         long elapsed = System.nanoTime() - t0;
 
         SortResult metrics = new SortResult(strategy.id(), buffer.size(),

@@ -67,7 +67,9 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 - ~~**Chaos mode**: inject anti-quicksort adversarial sequences to prove the introsort fallback fires.~~
   — ✅ done: `ChaosTest` builds the Bentley–McIlroy median-of-three killer and proves introsort stays
   sub-quadratic (`<= 8·n·log₂n`) where an unguarded quicksort goes `> n²/5` — the depth guard firing.
-- **Deterministic mode** (seeded pivots) for reproducible runs.
+- ~~**Deterministic mode** (seeded pivots) for reproducible runs.~~ — ✅ done: `SortContext.deterministic(seed)`
+  / `BeefSort.deterministic(seed)` seeds `QuickSortStrategy`'s pivot (`SplittableRandom`), so a run's exact
+  comparison/move counts repeat; `DeterministicSortTest` covers reproducibility + seed-sensitivity.
 
 ## Productization
 

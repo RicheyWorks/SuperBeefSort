@@ -147,6 +147,14 @@ introsort stays `<= 8·n·log₂n` and still sorts correctly (a >4× comparison 
 bounds were cross-checked against a faithful JS model of the engine's introsort (plain ≈ n²/4, intro ≈
 3.5·n·log₂n) before pinning.
 
+**Deterministic mode (reproducible runs):** `QuickSortStrategy` was the only non-deterministic sort (a
+`ThreadLocalRandom` pivot). A seed now threads `BeefSort.deterministic(seed)` → `JobSpec.randomSeed` →
+`SortContext.randomSeed()` → the strategy, which then seeds a `SplittableRandom` instead — so a run's exact
+pivot sequence, and thus its comparison/move counts, repeat. Default behaviour is unchanged (no seed →
+`ThreadLocalRandom`). `DeterministicSortTest` covers reproducibility (same seed → identical counts),
+seed-sensitivity (different seeds → different pivot sequences; confirmed in a model: 5 seeds → 5 distinct
+counts), correctness, and the seed threading. Pairs with `ChaosTest`: adversarial runs are now repeatable.
+
 ## Key decisions & gotchas (read before changing things)
 
 - **Composite build, not a published dependency.** `settings.gradle.kts` does `includeBuild("../CSRBT")`;

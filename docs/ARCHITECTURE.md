@@ -6,6 +6,13 @@ Version 0.1 · High-level architecture · Status: design
 
 ---
 
+![SuperBeefSort architecture — the implemented v0.1 pipeline](architecture.svg)
+
+> One pipeline, every stage pluggable: **profile → select → sort → feed → CSRBT**. The selector can
+> learn from what it runs (the `observe()` loop), and the whole run streams to the web step-visualizer.
+
+---
+
 ## 0. One-paragraph summary
 
 SuperBeefSort (SBS, "BeefSort") is a sorting **engine**, not a sorting library. It inspects data like a vision-based inspection station, picks an algorithm and a feeding personality the way a smart industrial line would, executes the hot loop on whichever runtime is fastest for that data shape, and then feeds the result into the **CSRBT** (Composable Self-Balancing Tree Engine) `OrderedSet<K>` / `EnsembleOrderedSet<K>` while respecting CSRBT's health gates, strategy system, and order statistics. It is **Java at the spine** (because that is where CSRBT lives), **Rust at the muscle** (high-performance kernels), **Python at the brain** (profiling, learned strategy selection), and **TypeScript at the eyes** (step-by-step visualization and observability). Crucially, every non-Java runtime is an *optional accelerator behind a stable interface* — the pure-Java path always works on its own.

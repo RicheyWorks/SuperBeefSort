@@ -1,0 +1,88 @@
+<svg viewBox="0 0 1320 400" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Roboto, system-ui, sans-serif">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5a6675"/></marker>
+    <marker id="ahb" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#d9603b"/></marker>
+    <marker id="ahe" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#3a4757"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1320" height="400" fill="#0d1117"/>
+
+  <text x="28" y="40" font-size="21" font-weight="700" fill="#e6edf3"><tspan fill="#d9603b">SuperBeefSort</tspan> engine<tspan fill="#5a6675">  —  profile  &#9656;  select  &#9656;  sort  &#9656;  feed  &#9656;  </tspan><tspan fill="#8a82ff">CSRBT</tspan></text>
+  <text x="28" y="60" font-size="12.5" fill="#5a6675">Every stage pluggable &#183; the pure-Java path always works &#183; the selector can learn from what it runs (v0.1, implemented)</text>
+
+  <!-- FACADE -->
+  <rect x="20" y="78" width="120" height="132" rx="12" fill="#131a23" stroke="#2b3a4d" stroke-width="1.5"/>
+  <text x="34" y="100" font-size="10.5" letter-spacing="1.5" fill="#8b98a8">FACADE</text>
+  <text x="34" y="122" font-size="12.5" font-weight="700" fill="#e6edf3" font-family="monospace">BeefSort</text>
+  <text x="34" y="146" font-size="11" fill="#9aa7b6" font-family="monospace">source</text>
+  <text x="34" y="165" font-size="11" fill="#9aa7b6" font-family="monospace">comparator</text>
+  <text x="34" y="184" font-size="11" fill="#9aa7b6" font-family="monospace">keyEncoder?</text>
+
+  <!-- PROFILE -->
+  <rect x="170" y="78" width="205" height="132" rx="12" fill="#17110d" stroke="#d9603b" stroke-width="1.5"/>
+  <text x="184" y="100" font-size="10.5" letter-spacing="1.5" fill="#c98a6f">1 &#183; PROFILE</text>
+  <text x="184" y="122" font-size="12.5" font-weight="700" fill="#e6edf3" font-family="monospace">IntelligentDataProfiler</text>
+  <text x="184" y="146" font-size="11" fill="#9aa7b6" font-family="monospace">sortedness &#183; runs</text>
+  <text x="184" y="165" font-size="11" fill="#9aa7b6" font-family="monospace">HLL distinct-count</text>
+  <text x="184" y="184" font-size="11" fill="#9aa7b6" font-family="monospace">key stats &#183; distribution</text>
+
+  <!-- SELECT -->
+  <rect x="405" y="78" width="205" height="132" rx="12" fill="#17110d" stroke="#d9603b" stroke-width="1.5"/>
+  <text x="419" y="100" font-size="10.5" letter-spacing="1.5" fill="#c98a6f">2 &#183; SELECT</text>
+  <text x="419" y="122" font-size="12.5" font-weight="700" fill="#e6edf3" font-family="monospace">StrategySelector</text>
+  <text x="419" y="146" font-size="11" fill="#9aa7b6" font-family="monospace">RuleBased (default)</text>
+  <text x="419" y="165" font-size="11" fill="#9aa7b6" font-family="monospace">CostModel (opt-in)</text>
+  <text x="419" y="184" font-size="11" fill="#ffd27a" font-family="monospace">Bandit &#8212; self-tuning</text>
+
+  <!-- SORT -->
+  <rect x="640" y="78" width="205" height="132" rx="12" fill="#17110d" stroke="#d9603b" stroke-width="1.5"/>
+  <text x="654" y="100" font-size="10.5" letter-spacing="1.5" fill="#c98a6f">3 &#183; SORT</text>
+  <text x="654" y="122" font-size="12.5" font-weight="700" fill="#e6edf3" font-family="monospace">SortStrategy  &#215;8</text>
+  <text x="654" y="146" font-size="11" fill="#9aa7b6" font-family="monospace">insertion merge quick3</text>
+  <text x="654" y="165" font-size="11" fill="#9aa7b6" font-family="monospace">heap intro timsort</text>
+  <text x="654" y="184" font-size="11" fill="#9aa7b6" font-family="monospace">counting  radix.lsd</text>
+
+  <!-- FEED -->
+  <rect x="875" y="78" width="205" height="132" rx="12" fill="#17110d" stroke="#d9603b" stroke-width="1.5"/>
+  <text x="889" y="100" font-size="10.5" letter-spacing="1.5" fill="#c98a6f">4 &#183; FEED</text>
+  <text x="889" y="122" font-size="12.5" font-weight="700" fill="#e6edf3" font-family="monospace">SortFeeder</text>
+  <text x="889" y="146" font-size="11" fill="#9aa7b6" font-family="monospace">Direct &#183; Balanced</text>
+  <text x="889" y="165" font-size="11" fill="#9aa7b6" font-family="monospace">Bulk = O(n) build</text>
+  <text x="889" y="184" font-size="11" fill="#9aa7b6" font-family="monospace">HealthGated</text>
+
+  <!-- CSRBT -->
+  <rect x="1110" y="78" width="190" height="132" rx="12" fill="#13101f" stroke="#8a82ff" stroke-width="1.5"/>
+  <text x="1124" y="100" font-size="10.5" letter-spacing="1.5" fill="#9a92e8">TARGET</text>
+  <text x="1124" y="122" font-size="12.5" font-weight="700" fill="#e6edf3" font-family="monospace">CSRBT</text>
+  <text x="1124" y="146" font-size="11" fill="#aab1d6" font-family="monospace">OrderedSet / Ensemble</text>
+  <text x="1124" y="165" font-size="11" fill="#aab1d6" font-family="monospace">RB-tree &#183; self-heal</text>
+  <text x="1124" y="184" font-size="11" fill="#aab1d6" font-family="monospace">order statistics</text>
+
+  <!-- pipeline arrows -->
+  <line x1="140" y1="140" x2="167" y2="140" stroke="#5a6675" stroke-width="2" marker-end="url(#ah)"/>
+  <line x1="375" y1="140" x2="402" y2="140" stroke="#5a6675" stroke-width="2" marker-end="url(#ah)"/>
+  <line x1="610" y1="140" x2="637" y2="140" stroke="#5a6675" stroke-width="2" marker-end="url(#ah)"/>
+  <line x1="845" y1="140" x2="872" y2="140" stroke="#5a6675" stroke-width="2" marker-end="url(#ah)"/>
+  <line x1="1080" y1="140" x2="1107" y2="140" stroke="#5a6675" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- learning feedback loop: sort result -> selector -->
+  <path d="M742,210 C742,252 507,252 507,213" fill="none" stroke="#d9603b" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ahb)"/>
+  <text x="624" y="270" text-anchor="middle" font-size="11" fill="#d9603b" font-family="monospace">observe(profile, strategy, SortResult.cost)</text>
+  <text x="624" y="286" text-anchor="middle" font-size="10.5" fill="#86705f">the Bandit refines the cheapest strategy per data context</text>
+
+  <!-- CSRBT order-statistics output -->
+  <text x="1124" y="232" font-size="11" fill="#8a82ff" font-family="monospace">&#9656; select(k) &#183; rank(key)</text>
+  <text x="1124" y="249" font-size="11" fill="#8a82ff" font-family="monospace">&#9656; median &#183; percentile</text>
+
+  <!-- event stream -> visualizer -->
+  <line x1="977" y1="210" x2="977" y2="300" stroke="#3a4757" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#ahe)"/>
+  <rect x="170" y="302" width="910" height="44" rx="10" fill="#0f151d" stroke="#243140"/>
+  <text x="625" y="322" text-anchor="middle" font-size="12" font-weight="600" fill="#8a82ff">SortEvent &#183; TreeEvent stream &#9656; web step-visualizer</text>
+  <text x="625" y="338" text-anchor="middle" font-size="11" fill="#5a6675" font-family="monospace">step-by-step &#183; auto-tune (bandit) &#183; record / replay &#183; order-statistics explorer</text>
+
+  <!-- legend -->
+  <rect x="28" y="366" width="12" height="12" rx="3" fill="#d9603b"/>
+  <text x="46" y="376" font-size="11.5" fill="#9aa7b6">SuperBeefSort (Java engine)</text>
+  <rect x="232" y="366" width="12" height="12" rx="3" fill="#8a82ff"/>
+  <text x="250" y="376" font-size="11.5" fill="#9aa7b6">CSRBT (the ordered-set engine it feeds)</text>
+  <text x="1292" y="376" text-anchor="end" font-size="10.5" fill="#3a4757" font-family="monospace">docs/architecture.svg</text>
+</svg>

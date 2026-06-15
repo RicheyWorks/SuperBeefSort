@@ -16,6 +16,8 @@ It's not a sorting library — it's an engine: **profile → select → sort →
 pluggable. Java is the spine; Rust kernels, a Python intelligence service, and a web visualizer are
 later phases, all optional accelerators behind the same interfaces.
 
+![SuperBeefSort architecture — profile, select, sort, feed into CSRBT](docs/architecture.svg)
+
 **Docs:** [architecture & design](docs/ARCHITECTURE.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md) · [step visualizer](web/visualizer.html)
 
 ## Status

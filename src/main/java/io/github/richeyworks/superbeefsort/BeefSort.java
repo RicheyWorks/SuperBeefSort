@@ -2,8 +2,11 @@ package io.github.richeyworks.superbeefsort;
 
 import io.github.richeyworks.csrbt.OrderedSet;
 import io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet;
+import io.github.richeyworks.csrbt.strategy.TreeStrategy;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
+import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
+import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
 import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
 import io.github.richeyworks.superbeefsort.engine.JobSpec;
 import io.github.richeyworks.superbeefsort.engine.SortRunResult;
@@ -12,9 +15,11 @@ import io.github.richeyworks.superbeefsort.feed.FeedMode;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.function.Supplier;
 
 /**
  * Fluent front door to SuperBeefSort. Supplying a {@link KeyEncoder} lets the engine choose
@@ -28,6 +33,10 @@ import java.util.OptionalLong;
  *         .policy(SelectionPolicy.SMART)
  *         .feedInto(set);
  * }</pre>
+ *
+ * <p>To have SuperBeefSort <em>construct</em> the CSRBT set (O(n), zero-rotation, born with the
+ * profile-advised balancing strategy) instead of feeding an existing one, use {@link #buildOrderedSet()}
+ * with {@link #accessPattern(AccessPolicy)} — see {@code docs/architecture-csrbt-integration.md}.</p>
  */
 public final class BeefSort<K> {
 
@@ -39,6 +48,8 @@ public final class BeefSort<K> {
     private KeyEncoder<K> keyEncoder; // null -> comparison sorts only
     private StrategySelector selector; // null -> engine default (rule-based)
     private OptionalLong randomSeed = OptionalLong.empty(); // present -> deterministic, reproducible runs
+    private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for buildOrderedSet()
+    private Supplier<? extends TreeStrategy<K>> targetStrategy; // null -> StrategyAdvisor decides
 
     private BeefSort(Comparator<? super K> comparator) {
         this.comparator = comparator;
@@ -84,6 +95,39 @@ public final class BeefSort<K> {
     public BeefSort<K> deterministic(long seed) {
         this.randomSeed = OptionalLong.of(seed);
         return this;
+    }
+
+    /** Declare the expected access pattern; {@link #buildOrderedSet()} picks the CSRBT strategy from it. */
+    public BeefSort<K> accessPattern(AccessPolicy p) {
+        this.accessPolicy = p == null ? AccessPolicy.BALANCED : p;
+        return this;
+    }
+
+    /** Override the advised CSRBT balancing strategy for {@link #buildOrderedSet()}. */
+    public BeefSort<K> targetStrategy(Supplier<? extends TreeStrategy<K>> strategy) {
+        this.targetStrategy = strategy;
+        return this;
+    }
+
+    /**
+     * Sort, then <em>construct</em> a CSRBT {@link OrderedSet} directly from the sorted run in O(n) with no
+     * rotations (via {@code OrderedSet.fromSorted}), born with the {@link #accessPattern}-advised (or
+     * {@link #targetStrategy}-overridden) balancing strategy. The "construct, don't insert" path — see
+     * docs/architecture-csrbt-integration.md.
+     */
+    public OrderedSet<K> buildOrderedSet() {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        List<K> sorted = run.sorted();
+        List<K> distinct = new ArrayList<>(sorted.size());
+        for (K k : sorted) {
+            if (distinct.isEmpty() || comparator.compare(distinct.get(distinct.size() - 1), k) != 0) {
+                distinct.add(k);
+            }
+        }
+        TreeStrategy<K> strategy = (targetStrategy != null)
+                ? targetStrategy.get()
+                : StrategyAdvisor.advise(run.profile(), accessPolicy);
+        return OrderedSet.fromSorted(distinct, strategy, comparator);
     }
 
     /** Sort only. */

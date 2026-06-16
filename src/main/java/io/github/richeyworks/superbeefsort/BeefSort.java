@@ -6,12 +6,14 @@ import io.github.richeyworks.csrbt.strategy.TreeStrategy;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
+import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
 import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
 import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
 import io.github.richeyworks.superbeefsort.engine.JobSpec;
 import io.github.richeyworks.superbeefsort.engine.SortRunResult;
 import io.github.richeyworks.superbeefsort.feed.CsrbtTarget;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
+import io.github.richeyworks.superbeefsort.feed.ParallelFeeder;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
 
@@ -34,9 +36,10 @@ import java.util.function.Supplier;
  *         .feedInto(set);
  * }</pre>
  *
- * <p>To have SuperBeefSort <em>construct</em> the CSRBT set (O(n), zero-rotation, born with the
- * profile-advised balancing strategy) instead of feeding an existing one, use {@link #buildOrderedSet()}
- * with {@link #accessPattern(AccessPolicy)} — see {@code docs/architecture-csrbt-integration.md}.</p>
+ * <p>To have SuperBeefSort <em>construct</em> the CSRBT target (O(n), zero-rotation, born with the
+ * profile-advised balancing strategy) instead of feeding an existing one, use {@link #buildOrderedSet()} or
+ * {@link #buildEnsemble()} with {@link #accessPattern(AccessPolicy)} — see
+ * {@code docs/architecture-csrbt-integration.md}.</p>
  */
 public final class BeefSort<K> {
 
@@ -48,7 +51,7 @@ public final class BeefSort<K> {
     private KeyEncoder<K> keyEncoder; // null -> comparison sorts only
     private StrategySelector selector; // null -> engine default (rule-based)
     private OptionalLong randomSeed = OptionalLong.empty(); // present -> deterministic, reproducible runs
-    private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for buildOrderedSet()
+    private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for build*()
     private Supplier<? extends TreeStrategy<K>> targetStrategy; // null -> StrategyAdvisor decides
 
     private BeefSort(Comparator<? super K> comparator) {
@@ -97,7 +100,7 @@ public final class BeefSort<K> {
         return this;
     }
 
-    /** Declare the expected access pattern; {@link #buildOrderedSet()} picks the CSRBT strategy from it. */
+    /** Declare the expected access pattern; {@link #buildOrderedSet()} / {@link #buildEnsemble()} pick the CSRBT strategy from it. */
     public BeefSort<K> accessPattern(AccessPolicy p) {
         this.accessPolicy = p == null ? AccessPolicy.BALANCED : p;
         return this;
@@ -117,17 +120,23 @@ public final class BeefSort<K> {
      */
     public OrderedSet<K> buildOrderedSet() {
         SortRunResult<K> run = engine().sort(source, comparator, spec());
-        List<K> sorted = run.sorted();
-        List<K> distinct = new ArrayList<>(sorted.size());
-        for (K k : sorted) {
-            if (distinct.isEmpty() || comparator.compare(distinct.get(distinct.size() - 1), k) != 0) {
-                distinct.add(k);
-            }
-        }
+        List<K> distinct = distinct(run.sorted());
         TreeStrategy<K> strategy = (targetStrategy != null)
                 ? targetStrategy.get()
                 : StrategyAdvisor.advise(run.profile(), accessPolicy);
         return OrderedSet.fromSorted(distinct, strategy, comparator);
+    }
+
+    /**
+     * Sort, then <em>construct and bulk-load</em> a CSRBT {@link EnsembleOrderedSet} composed from the profile
+     * (primary born with the access-advised strategy + a RedBlack replica), via the O(n)/member parallel
+     * bulk path. The "ensemble as a first-class target" pattern — see docs/architecture-csrbt-integration.md §4.
+     */
+    public EnsembleOrderedSet<K> buildEnsemble() {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        EnsembleOrderedSet<K> ensemble = EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator);
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
+        return ensemble;
     }
 
     /** Sort only. */
@@ -149,6 +158,17 @@ public final class BeefSort<K> {
         return selector == null
                 ? new BeefSortEngine<>(keyEncoder)
                 : new BeefSortEngine<>(selector, keyEncoder);
+    }
+
+    /** Linear de-dup of an already-ascending run under {@link #comparator}. */
+    private List<K> distinct(List<K> sorted) {
+        List<K> out = new ArrayList<>(sorted.size());
+        for (K k : sorted) {
+            if (out.isEmpty() || comparator.compare(out.get(out.size() - 1), k) != 0) {
+                out.add(k);
+            }
+        }
+        return out;
     }
 
     private JobSpec spec() {

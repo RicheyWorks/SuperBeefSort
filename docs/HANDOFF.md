@@ -4,8 +4,12 @@ Last updated: 2026-06-16. Author: Richmond (with Claude). Status: **Phase 0 + Ph
 (parallel mirror ensemble feed + O(n)/member bulk fast path) shipped; Phase 2 Rust radix kernel via Panama
 FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
-web step-visualizer with self-contained record/replay. Everything is `./gradlew build` **green (64 tests, 0
-failures)**, verified against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox). See
+web step-visualizer with self-contained record/replay; a bounded streaming feed; and **concept-drift-aware
+adaptive streaming** that re-selects the sort strategy mid-stream; and **profile-guided co-optimization** (the
+sort's data profile primes the tree's strategy adaptation). Everything is `./gradlew build` **green**, verified
+against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox); the new drift + co-optimization
+suites are **17/17 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`), so run `./gradlew build`
+host-side for the full count. See
 the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
 at full strength next.
 
@@ -140,7 +144,7 @@ commit is pushed.
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
 `BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`, `DifferentialTest`, `ChaosTest`,
-`DeterministicSortTest`, `LearnedSortPropertyTest`; CSRBT: `BulkBuildTest`.
+`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`; CSRBT: `BulkBuildTest`.
 
 **Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
 the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
@@ -173,6 +177,42 @@ wide-range integer keys (~5n vs ~8n) and it's a **bandit** arm. Correctness pinn
 `LearnedSortPropertyTest` (jqwik bounded ints incl. negatives + a uniform/sorted/reversed/all-equal/
 clustered/skewed/dup-heavy battery); the algorithm + bounds were verified in a JS model first. Left as the
 default rule-selector choice: still counting/radix (learned is reachable via the cost-model/bandit paths).
+
+**Concept-drift detection (adaptive streaming):** a new `stream/` package makes a long-running stream re-tune
+its sort strategy when — and only when — the data distribution shifts. `DriftSignal.from(profile)` distils a
+batch into a scale-normalized fingerprint (sortedness, global inversion ratio, cardinality ratio,
+`Distribution` class, and the integer-key range's location/scale); `DriftSignal.distanceTo` is the **max** over
+those facet distances, so one strong shift (e.g. the key range jumping a decade) is never diluted by stable
+facets. `DriftDetector` keeps the fingerprint the current strategy was chosen for as a reference and fires when
+a new batch's distance reaches `threshold` (default 0.20), then re-baselines to the new regime; `warmup` and
+`cooldown` are the anti-thrash guards (the `MorphPolicy` analogue). `AdaptiveStreamSorter` — via
+`BeefSort.adaptiveStream(target, maxSize[, detector])` — drives the loop: SHALLOW-profile each batch,
+drift-test, **re-select only on drift** (else reuse the cached `SortPlan`), sort, and stream-feed into the
+bounded CSRBT target via the existing `StreamingFeeder`. This is the sort-side mirror of CSRBT's
+`MorphController` (`WorkloadAdaptation`): that re-tunes the *tree* to the live *access* pattern, this re-tunes
+the *sort* to the live *data* distribution; both gate change behind threshold + warmup/stability + cooldown. A
+stationary stream selects once and never thrashes; a stream that shifts regime (sorted → bounded-range →
+wide-range) re-selects per regime (insertion → counting → radix) and stays correct. Covered by
+`ConceptDriftTest` (distance geometry; detector baseline/stationary/drift/cooldown/warmup; and end-to-end
+against a real `OrderedSet`) — compiled with SBS main against a clean CSRBT clone on a bootstrapped JDK 17
+in-sandbox, **10/10 green**.
+
+**Co-optimization — profile-guided tree adaptation ("two engines talking"):** `csrbt/ProfileGuidedScorer`
+implements CSRBT's `StrategyScorer` and decorates the closed-form `CostModelStrategyScorer` with a
+profile-derived **prior** — a multiplicative cost discount (default 15%) on the morph-family strategy the
+sort's `DataProfile` + `AccessPolicy` favor (`favoredStrategy(...)`: READ_HEAVY→AVL, SKEWED/clustered→Splay,
+WRITE_HEAVY→Red-Black, else Red-Black) — then re-ranks. It is a pure function of the immutable
+`WorkloadFeatures`, composing only public CSRBT control-plane types (no CSRBT changes). The prior is a nudge,
+not an override: the live cost model still wins once another strategy is cheaper by more than the margin, so
+thin/early evidence defers to the profile and real traffic takes over. `WorkloadAdaptation.attachProfileGuided`
+wires it over the default rolling monitor; `BeefSort.buildCoOptimized(MorphPolicy)` is the headline path —
+sort, build the tree *born* in the favored morph strategy, and attach adaptation primed with that prior
+(always a morph-managed strategy, so WRITE_HEAVY maps to Red-Black here, never the static weight-balanced
+shape `buildAdaptive` rejects). This is the structural mirror of the concept-drift detector above: drift
+re-tunes the *sort* to the live data; co-optimization lets the sort teach the *tree*. Covered by
+`CoOptimizationTest` (the mapping; the prior's re-ranking against a stub base scorer; and end-to-end
+born-from-profile + correctness + holds-under-matching-workload) — compiled with SBS main against a clean
+CSRBT clone on a bootstrapped JDK 17 in-sandbox, **7/7 green** (the full drift + co-opt run is **17/17**).
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -230,7 +270,8 @@ default rule-selector choice: still counting/radix (learned is reachable via the
   periodic input, so insertion routing deliberately trusts only the **exact** count (small/`DEEP`).
   Folding the inversion estimate into the TimSort run-count model (rather than just insertion) is still
   open.
-- Parallel/streaming/external sort not implemented.
+- External / out-of-core sort not implemented. (Parallel mirror feed, bounded streaming, and
+  concept-drift-adaptive streaming now are — see the streaming + drift sections above.)
 
 ## Next steps (roadmap)
 
@@ -276,3 +317,32 @@ CI stays red. There the bulk-build is already committed (`7820d88`); commit the 
 bits (the `OrderedSet` resync trim, `docs/ADR-014`, the essay) and push that repo as well.
 
 Without `gh`: create the repos on GitHub, then `git remote add origin …` and `git push -u origin main`.
+
+**This session — concept-drift adaptive streaming.** New files to commit host-side:
+`src/main/java/io/github/richeyworks/superbeefsort/stream/` (`DriftSignal`, `DriftVerdict`, `DriftDetector`,
+`AdaptiveStreamSorter`, `StreamSortResult`), a `BeefSort.adaptiveStream(...)` entry, and
+`src/test/java/io/github/richeyworks/superbeefsort/ConceptDriftTest.java`:
+
+```powershell
+cd C:\Users\730ri\projects\SuperBeefSort
+./gradlew build   # confirm the full suite (incl. ConceptDriftTest) is green on your toolchain
+git add -A
+git commit -m "feat: concept-drift detection + AdaptiveStreamSorter (re-select sort strategy mid-stream)"
+```
+
+Recurring sandbox gotcha (re-confirmed this session): the Linux mount served a **truncated** copy of
+`BeefSort.java` right after the edit, so the in-sandbox compile used a faithful reconstruction of that one
+file; the host file is complete and correct. As always, the host-side `./gradlew build` is the source of
+truth — just run it before pushing.
+
+**This session also added co-optimization.** New/changed: `csrbt/ProfileGuidedScorer.java`,
+`WorkloadAdaptation.attachProfileGuided(...)`, `BeefSort.buildCoOptimized(...)`, and
+`src/test/java/.../CoOptimizationTest.java`. Same in-sandbox gotcha recurred — the mount served **truncated**
+copies of `BeefSort.java` *and* `WorkloadAdaptation.java` after the edits, so the in-sandbox compile used
+faithful reconstructions of those two; the host files are complete and correct. Verified 17/17 (drift + co-opt)
+on the bootstrapped JDK 17. Commit host-side after `./gradlew build`:
+
+```powershell
+git add -A
+git commit -m "feat: co-optimization - ProfileGuidedScorer + BeefSort.buildCoOptimized (sort profile primes CSRBT tree adaptation)"
+```

@@ -8,6 +8,7 @@ import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
+import io.github.richeyworks.superbeefsort.csrbt.ProfileGuidedScorer;
 import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
 import io.github.richeyworks.superbeefsort.csrbt.WorkloadAdaptation;
 import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
@@ -21,6 +22,8 @@ import io.github.richeyworks.superbeefsort.feed.ParallelFeeder;
 import io.github.richeyworks.superbeefsort.feed.StreamingFeeder;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
+import io.github.richeyworks.superbeefsort.stream.AdaptiveStreamSorter;
+import io.github.richeyworks.superbeefsort.stream.DriftDetector;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -163,6 +166,23 @@ public final class BeefSort<K> {
     }
 
     /**
+     * Sort, build a born-optimal {@link OrderedSet} in the morph-family strategy the data profile favors,
+     * then wire it to CSRBT's control plane with a {@link ProfileGuidedScorer} prior toward that strategy —
+     * "co-optimization": the sort's profile both shapes the tree at birth and primes its adaptation, which
+     * then defers to the live workload (docs/architecture-csrbt-integration.md §5). Unlike
+     * {@link #buildAdaptive(MorphPolicy)} this always uses a morph-managed strategy (so WRITE_HEAVY maps to
+     * Red-Black here, not the static weight-balanced shape), guaranteeing the tree can adapt.
+     */
+    public WorkloadAdaptation<K> buildCoOptimized(MorphPolicy policy) {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        List<K> distinct = distinct(run.sorted());
+        var favored = ProfileGuidedScorer.favoredStrategy(run.profile(), accessPolicy);
+        TreeStrategy<K> born = (targetStrategy != null) ? targetStrategy.get() : favored.<K>newStrategy();
+        OrderedSet<K> set = OrderedSet.fromSorted(distinct, born, comparator);
+        return WorkloadAdaptation.attachProfileGuided(set, run.profile(), accessPolicy, policy);
+    }
+
+    /**
      * Sort, then <em>stream</em> the run into a bounded {@code target}: SuperBeefSort sets the window
      * ({@code maxSize}) and feeds in {@link #withHealthPolicy(HealthPolicy) policy}-sized batches with
      * self-heal backpressure. Because the run is ascending and CSRBT FIFO-evicts the oldest-inserted key,
@@ -172,6 +192,31 @@ public final class BeefSort<K> {
     public FeedResult streaming(OrderedSet<K> target, int maxSize) {
         SortRunResult<K> run = engine().sort(source, comparator, spec());
         return new StreamingFeeder<K>(maxSize, healthPolicy).feed(run.sorted(), CsrbtTarget.of(target));
+    }
+
+    /**
+     * Build a drift-aware {@link AdaptiveStreamSorter} that streams successive <em>batches</em> into
+     * {@code target} (bounded to {@code maxSize}; {@code <= 0} unbounded), re-selecting the sort strategy
+     * only when the data distribution drifts — the sort-side mirror of CSRBT's morph controller. Reuses
+     * this builder's comparator, key encoder, selector, policy, observer, and {@link #withHealthPolicy
+     * health policy}; {@link #source(List)} is ignored (feed batches via
+     * {@link AdaptiveStreamSorter#accept(List)}). Uses the default {@link DriftDetector}; see
+     * {@link #adaptiveStream(OrderedSet, int, DriftDetector)} to tune threshold/warmup/cooldown.
+     */
+    public AdaptiveStreamSorter<K> adaptiveStream(OrderedSet<K> target, int maxSize) {
+        return adaptiveStream(target, maxSize, new DriftDetector());
+    }
+
+    /** As {@link #adaptiveStream(OrderedSet, int)} but with a caller-supplied {@link DriftDetector}. */
+    public AdaptiveStreamSorter<K> adaptiveStream(OrderedSet<K> target, int maxSize, DriftDetector detector) {
+        return AdaptiveStreamSorter.<K>builder(comparator)
+                .keyEncoder(keyEncoder)
+                .selector(selector)
+                .policy(policy)
+                .detector(detector)
+                .healthPolicy(healthPolicy)
+                .observe(observer)
+                .into(target, maxSize);
     }
 
     /** Sort only. */

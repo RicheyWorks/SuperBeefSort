@@ -28,8 +28,14 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   counting-vs-radix boundary, radix base — from observed timings.
 - **Cost model**: predict per-strategy runtime from profile features, pick the argmin. Train offline
   from the JMH harness, ship the model as the selector (replaces `RuleBasedStrategySelector`).
-- **Concept-drift detection** on streaming workloads → re-profile and re-select mid-stream. Mirrors
-  CSRBT's own morph controller.
+- ~~**Concept-drift detection** on streaming workloads → re-profile and re-select mid-stream.~~ — ✅ done:
+  `stream/` package — `DriftSignal` (a scale-normalized per-batch fingerprint: sortedness, inversion ratio,
+  cardinality, `Distribution` class, integer-key location/scale; distance = *max* over facets), `DriftDetector`
+  (windowed reference comparison with threshold + warmup + cooldown, re-baselining on drift), and
+  `AdaptiveStreamSorter` (`BeefSort.adaptiveStream(target, maxSize)`): SHALLOW-profile each batch, drift-test,
+  re-select **only on drift** (else reuse the cached plan), sort, stream-feed. The sort-side mirror of CSRBT's
+  morph controller — that re-tunes the tree to the access pattern, this re-tunes the sort to the data
+  distribution. `ConceptDriftTest` (10 cases) green vs real CSRBT on a bootstrapped JDK 17.
 
 ## CSRBT-native depth (the unique angle)
 
@@ -46,8 +52,14 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   ensemble; fans `buildFromSorted` out to every member via the executor), which `ParallelFeeder` prefers
   when the ensemble is empty, falling back to median-first `add` otherwise. Built + tested green
   (JDK 17 + CSRBT in-sandbox, 63 tests).
-- **Co-optimization.** SBS profiler hands hints to CSRBT's `MorphController` ("uniform keys,
-  read-heavy → weight-balanced") so the sort informs the tree's strategy. Two engines talking.
+- ~~**Co-optimization.** SBS profiler hands hints to CSRBT's `MorphController` so the sort informs the
+  tree's strategy.~~ — ✅ done: `ProfileGuidedScorer` (a CSRBT `StrategyScorer`) decorates the cost-model
+  scorer with a profile-derived **prior** — a multiplicative discount toward the morph-family strategy the
+  profile favors (`favoredStrategy(profile, access)`: read-heavy→AVL, skewed/clustered→Splay,
+  write-heavy→Red-Black). The prior nudges, never overrides (the live cost model wins once it separates the
+  costs by more than the margin). `BeefSort.buildCoOptimized(policy)` builds the tree *born* in that strategy
+  AND attaches `WorkloadAdaptation` primed with the prior — the sort's profile both shapes the tree at birth
+  and seeds its adaptation. `CoOptimizationTest` (7 cases) green vs real CSRBT on JDK 17. Two engines talking.
 - **Order-statistic-aware feeding.** Precompute ranks during the sort, pass them to CSRBT to validate
   / skip redundant work.
 

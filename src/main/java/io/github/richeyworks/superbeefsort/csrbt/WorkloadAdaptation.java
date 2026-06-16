@@ -13,6 +13,7 @@ import io.github.richeyworks.csrbt.strategy.HybridStrategy;
 import io.github.richeyworks.csrbt.strategy.RedBlackStrategy;
 import io.github.richeyworks.csrbt.strategy.SplayStrategy;
 import io.github.richeyworks.csrbt.strategy.TreeStrategy;
+import io.github.richeyworks.superbeefsort.profile.DataProfile;
 
 import java.util.Objects;
 
@@ -67,6 +68,17 @@ public final class WorkloadAdaptation<K> {
     public static <K> WorkloadAdaptation<K> attach(OrderedSet<K> set, WorkloadMonitor monitor,
                                                    StrategyScorer scorer, MorphPolicy policy) {
         return new WorkloadAdaptation<>(set, monitor, scorer, policy);
+    }
+
+    /**
+     * Attach <em>profile-guided</em> adaptation: CSRBT's cost-model scorer biased by a
+     * {@link ProfileGuidedScorer} prior toward the strategy SuperBeefSort's {@code profile} + {@code access}
+     * favor, over CSRBT's default rolling monitor under {@code policy}. The "two engines talking" wiring —
+     * the sort's data profile primes the tree's adaptation (docs/architecture-csrbt-integration.md §5).
+     */
+    public static <K> WorkloadAdaptation<K> attachProfileGuided(OrderedSet<K> set, DataProfile profile,
+                                                                AccessPolicy access, MorphPolicy policy) {
+        return attach(set, new RollingWorkloadMonitor(), ProfileGuidedScorer.forProfile(profile, access), policy);
     }
 
     /** The live set: reads/writes flow through this instance, which is the one morphed in place. */

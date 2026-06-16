@@ -15,7 +15,10 @@ import io.github.richeyworks.superbeefsort.engine.JobSpec;
 import io.github.richeyworks.superbeefsort.engine.SortRunResult;
 import io.github.richeyworks.superbeefsort.feed.CsrbtTarget;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
+import io.github.richeyworks.superbeefsort.feed.FeedResult;
+import io.github.richeyworks.superbeefsort.feed.HealthPolicy;
 import io.github.richeyworks.superbeefsort.feed.ParallelFeeder;
+import io.github.richeyworks.superbeefsort.feed.StreamingFeeder;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
 
@@ -55,6 +58,7 @@ public final class BeefSort<K> {
     private OptionalLong randomSeed = OptionalLong.empty(); // present -> deterministic, reproducible runs
     private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for build*()
     private Supplier<? extends TreeStrategy<K>> targetStrategy; // null -> StrategyAdvisor decides
+    private HealthPolicy healthPolicy = HealthPolicy.defaults(); // streaming batch size + self-heal cadence
 
     private BeefSort(Comparator<? super K> comparator) {
         this.comparator = comparator;
@@ -114,6 +118,12 @@ public final class BeefSort<K> {
         return this;
     }
 
+    /** Health/backpressure policy for the streaming feeder (batch size + self-heal cadence). */
+    public BeefSort<K> withHealthPolicy(HealthPolicy policy) {
+        this.healthPolicy = (policy == null) ? HealthPolicy.defaults() : policy;
+        return this;
+    }
+
     /**
      * Sort, then <em>construct</em> a CSRBT {@link OrderedSet} directly from the sorted run in O(n) with no
      * rotations (via {@code OrderedSet.fromSorted}), born with the {@link #accessPattern}-advised (or
@@ -150,6 +160,18 @@ public final class BeefSort<K> {
      */
     public WorkloadAdaptation<K> buildAdaptive(MorphPolicy policy) {
         return WorkloadAdaptation.attach(buildOrderedSet(), policy);
+    }
+
+    /**
+     * Sort, then <em>stream</em> the run into a bounded {@code target}: SuperBeefSort sets the window
+     * ({@code maxSize}) and feeds in {@link #withHealthPolicy(HealthPolicy) policy}-sized batches with
+     * self-heal backpressure. Because the run is ascending and CSRBT FIFO-evicts the oldest-inserted key,
+     * the target converges to the largest {@code maxSize} distinct keys — a sliding-window / top-N target.
+     * {@code maxSize <= 0} streams unbounded. The streaming / bounded path — docs/architecture-csrbt-integration.md §2.3.
+     */
+    public FeedResult streaming(OrderedSet<K> target, int maxSize) {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        return new StreamingFeeder<K>(maxSize, healthPolicy).feed(run.sorted(), CsrbtTarget.of(target));
     }
 
     /** Sort only. */

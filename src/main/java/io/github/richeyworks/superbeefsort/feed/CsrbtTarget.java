@@ -73,6 +73,24 @@ public final class CsrbtTarget<K> {
         return healing == null || healing.selfRepair();
     }
 
+    /** True when the target supports a bounded sliding window ({@code setMaxSize}); i.e. it is an {@link OrderedSet}. */
+    public boolean supportsWindow() {
+        return orderedSet != null;
+    }
+
+    /** Bound the target to a sliding window of {@code n} (0 = unbounded); CSRBT FIFO-evicts oldest-inserted keys. */
+    public void setMaxSize(int n) {
+        if (orderedSet == null) {
+            throw new IllegalStateException("setMaxSize requires an OrderedSet target");
+        }
+        orderedSet.setMaxSize(n);
+    }
+
+    /** The target's current window capacity, or {@code 0} when unbounded / not an OrderedSet. */
+    public int getMaxSize() {
+        return orderedSet == null ? 0 : orderedSet.getMaxSize();
+    }
+
     /** True when an O(n) bulk build is possible: the target is an {@link OrderedSet} and currently empty. */
     public boolean supportsBulkBuild() {
         return orderedSet != null && orderedSet.isEmpty();

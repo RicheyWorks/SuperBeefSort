@@ -17,6 +17,7 @@ import io.github.richeyworks.superbeefsort.feed.HealthGatedFeeder;
 import io.github.richeyworks.superbeefsort.feed.ParallelFeeder;
 import io.github.richeyworks.superbeefsort.feed.PrecisionFeeder;
 import io.github.richeyworks.superbeefsort.feed.SortFeeder;
+import io.github.richeyworks.superbeefsort.feed.StreamingFeeder;
 import io.github.richeyworks.superbeefsort.profile.DataProfile;
 import io.github.richeyworks.superbeefsort.profile.DataProfiler;
 import io.github.richeyworks.superbeefsort.profile.IntelligentDataProfiler;
@@ -147,6 +148,7 @@ public final class BeefSortEngine<K> {
             case HEALTH_GATED -> new HealthGatedFeeder<>();
             case PRECISION -> new PrecisionFeeder<>();
             case PARALLEL -> new ParallelFeeder<>();
+            case STREAMING -> new StreamingFeeder<>();
         };
     }
 

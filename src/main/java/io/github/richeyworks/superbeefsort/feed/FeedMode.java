@@ -17,5 +17,12 @@ public enum FeedMode {
      * built with {@code parallelFanOut()}: each {@code add} fans out to all mirror members concurrently
      * (ADR-003 E5), so the per-member builds overlap with no SuperBeefSort-side threads.
      */
-    PARALLEL
+    PARALLEL,
+    /**
+     * Bounded sliding-window / top-N feed: the {@link StreamingFeeder} caps the target via
+     * {@code OrderedSet.setMaxSize} (CSRBT FIFO-evicts the oldest-inserted key) and feeds the ascending
+     * run in {@link HealthPolicy}-sized batches with self-heal backpressure, converging to the largest
+     * {@code maxSize} distinct keys. {@code maxSize <= 0} streams unbounded.
+     */
+    STREAMING
 }

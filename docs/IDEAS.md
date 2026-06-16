@@ -54,7 +54,11 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 ## Performance engineering
 
 - **Rust radix kernel via Panama FFM** (Phase 2): zero-copy off-heap `MemorySegment` + rayon +
-  `std::simd`, Java radix retained as the capability fallback.
+  `std::simd`, Java radix retained as the capability fallback. — **PoC proven** (see
+  [`phase2-ffm/`](../phase2-ffm/)): a Rust LSD radix `cdylib` sorted a `long[]` via an off-heap FFM
+  downcall (JDK 21, finalized API), 300 random arrays incl. negatives, 0 mismatches. Remaining: the
+  Gradle module + multi-JDK toolchain, the `backingRuntime=RUST` strategy with Java fallback, an off-heap
+  `SortBuffer`, and a benchmark vs Java radix.
 - **Java Vector API** (`jdk.incubator.vector`) for branchless compare/partition — SIMD with no native
   build.
 - **Off-heap arena buffers** to sort 10^8+ keys with zero GC pressure; NUMA-aware sample sort.

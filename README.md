@@ -26,8 +26,8 @@ Python intelligence service are optional later-phase accelerators behind the sam
 |-------|-------|-------|
 | 0 | Pure-Java skeleton: pipeline, 6 comparison strategies, SPI registry, balanced + health-gated CSRBT feeders | ✅ done |
 | 1 | Intelligence: HyperLogLog profiler, integer key stats + distribution, counting/LSD-radix sorts, capability-gated selection | ✅ done |
-| 2 | Rust radix kernel via Panama FFM (Java fallback retained) | planned |
-| 3 | Ensemble range-sharded feeding + streaming/backpressure | planned |
+| 2 | Rust radix kernel via Panama FFM (Java fallback retained) | **PoC proven** ([`phase2-ffm/`](phase2-ffm/)); productization planned |
+| 3 | Ensemble **parallel mirror feed** (O(n)/member bulk-build) · streaming/backpressure | feed **✅ done**; streaming planned |
 | 4–5 | Python ML selection · distributed / external sort | planned |
 | ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** | ✅ done |
 

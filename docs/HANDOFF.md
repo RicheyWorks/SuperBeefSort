@@ -1,9 +1,13 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-15. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete — plus
-opt-in cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a web step-visualizer.**
-Earlier work is `./gradlew build` green host-side; this session's selector code (`BanditStrategySelector`
-+ the engine feedback hook) is static-reviewed and fuzz-traced but still needs a host-side `./gradlew build`.
+Last updated: 2026-06-16. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete; Phase 3
+(parallel mirror ensemble feed + O(n)/member bulk fast path) shipped; Phase 2 Rust radix kernel via Panama
+FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
+web step-visualizer with self-contained record/replay. Everything is `./gradlew build` **green (64 tests, 0
+failures)**, verified against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox). See
+the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
+at full strength next.
 
 ## TL;DR
 

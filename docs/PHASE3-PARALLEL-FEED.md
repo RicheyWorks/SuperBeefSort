@@ -60,7 +60,21 @@ feeder calls it when all members are empty + strategy-backed, else falls back to
 
 **Status of the environment:** the sandbox now has a working JDK 17 + a CSRBT checkout, and
 `./gradlew build` is green (61 tests, 0 failures) — so the corrected design can be implemented and tested
-here directly. §2–§4 are retained below as the record of the original (range-partitioned) assumption.
+here directly. **Measured (JMH `EnsembleFeedBenchmark`, n=100k into a 3-member mirror ensemble; quick run, indicative):**
+
+| feed path | ms/op |
+|---|---|
+| `parallelBulkBuild` — `buildAllFromSorted`, parallel fan-out | **~3.6** |
+| `sequentialMedianAdd` — median-first `add`, sequential fan-out | ~133 |
+| `parallelMedianAdd` — median-first `add`, parallel fan-out | ~4900 |
+
+The O(n)/member bulk path wins by ~36× over sequential add. The key finding: **per-`add` parallel fan-out
+is a *pessimization*** (~4.9 s) — the thread-handoff cost per tiny `add` (~48 µs) swamps 100k inserts. So
+`parallelFanOut()` pays off only with the *bulk* path (one fan-out of a big build per member), never with
+median-`add`. That's precisely why `ParallelFeeder` prefers `buildAllFromSorted` and its fallback is plain
+median-add — it never relies on per-add parallelism.
+
+§2–§4 are retained below as the record of the original (range-partitioned) assumption.
 
 ---
 

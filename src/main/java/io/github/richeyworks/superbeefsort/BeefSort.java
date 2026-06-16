@@ -4,7 +4,10 @@ import io.github.richeyworks.csrbt.OrderedSet;
 import io.github.richeyworks.csrbt.control.MorphPolicy;
 import io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet;
 import io.github.richeyworks.csrbt.strategy.TreeStrategy;
+import io.github.richeyworks.superbeefsort.core.ByteSequenceEncoder;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
+import io.github.richeyworks.superbeefsort.core.SortBuffer;
+import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
@@ -22,6 +25,7 @@ import io.github.richeyworks.superbeefsort.feed.ParallelFeeder;
 import io.github.richeyworks.superbeefsort.feed.StreamingFeeder;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
+import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.stream.AdaptiveStreamSorter;
 import io.github.richeyworks.superbeefsort.stream.DriftDetector;
 
@@ -217,6 +221,18 @@ public final class BeefSort<K> {
                 .healthPolicy(healthPolicy)
                 .observe(observer)
                 .into(target, maxSize);
+    }
+
+    /**
+     * MSD-radix-sort the {@link #source(List) source} by a {@link ByteSequenceEncoder} view of the keys
+     * (strings, byte arrays) and return the sorted list — the variable-length-key path the {@code long}-keyed
+     * counting / LSD-radix sorts can't serve. The encoder must be faithful to this builder's comparator
+     * (see {@link ByteSequenceEncoder#forStrings()}). Stable.
+     */
+    public List<K> sortByteKeys(ByteSequenceEncoder<K> encoder) {
+        SortBuffer<K> buffer = SortBuffer.of(source, comparator, keyEncoder);
+        new MsdRadixSortStrategy<K>(encoder).sort(buffer, new SortContext(observer, randomSeed));
+        return buffer.toList();
     }
 
     /** Sort only. */

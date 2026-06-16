@@ -6,9 +6,9 @@ FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort,
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
 web step-visualizer with self-contained record/replay; a bounded streaming feed; and **concept-drift-aware
 adaptive streaming** that re-selects the sort strategy mid-stream; and **profile-guided co-optimization** (the
-sort's data profile primes the tree's strategy adaptation). Everything is `./gradlew build` **green**, verified
+sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys**. Everything is `./gradlew build` **green**, verified
 against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox); the new drift + co-optimization
-suites are **17/17 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`), so run `./gradlew build`
+suites are **23/23 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`), so run `./gradlew build`
 host-side for the full count. See
 the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
 at full strength next.
@@ -144,7 +144,7 @@ commit is pushed.
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
 `BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`, `DifferentialTest`, `ChaosTest`,
-`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`; CSRBT: `BulkBuildTest`.
+`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`; CSRBT: `BulkBuildTest`.
 
 **Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
 the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
@@ -213,6 +213,22 @@ re-tunes the *sort* to the live data; co-optimization lets the sort teach the *t
 `CoOptimizationTest` (the mapping; the prior's re-ranking against a stub base scorer; and end-to-end
 born-from-profile + correctness + holds-under-matching-workload) — compiled with SBS main against a clean
 CSRBT clone on a bootstrapped JDK 17 in-sandbox, **7/7 green** (the full drift + co-opt run is **17/17**).
+
+**MSD radix for variable-length keys (strings / byte arrays):** `strategy/MsdRadixSortStrategy` +
+`core/ByteSequenceEncoder` add the string/byte-key path the single-`long` `KeyEncoder` (counting, LSD radix,
+learned) can't serve — those keys have no faithful `long` encoding. The encoder exposes a key as a byte
+sequence (`length` + unsigned `byteAt`); the strategy is a stable, **iterative** (explicit-stack) MSD radix:
+at each depth it distributes the range into 257 buckets (bucket 0 = "key ended here", so a prefix sorts before
+its extensions; 1..256 = byte value) and recurses each byte bucket at the next depth, with a small range
+falling back to a stable insertion sort over the real comparator (which also makes it correct for any faithful
+encoder). `ByteSequenceEncoder.forStrings()` views a `String` as big-endian UTF-16 bytes and reproduces
+`String.compareTo` exactly (both order by UTF-16 code unit, prefix-first — surrogates included);
+`forByteArrays()` + `byteArrayComparator()` give unsigned-lex order. Exposed via `BeefSort.sortByteKeys(enc)`
+(stable). It is **not auto-selected** — the profiler/selector are built around the single-`long` key model —
+so it's an explicit-construction strategy for now (profiler/selector integration and the entropy-aware
+base/pass-count choice are the natural follow-ups). Covered by `MsdRadixSortTest` (random small/large alphabets
++ BMP/unicode, pathological prefix/empty/duplicate shapes, an explicit stability check, byte[] keys, and the
+facade) — compiled with SBS main on the bootstrapped JDK 17, **6/6 green** (full new-feature run 23/23).
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -345,4 +361,15 @@ on the bootstrapped JDK 17. Commit host-side after `./gradlew build`:
 ```powershell
 git add -A
 git commit -m "feat: co-optimization - ProfileGuidedScorer + BeefSort.buildCoOptimized (sort profile primes CSRBT tree adaptation)"
+```
+
+**This session also added MSD radix for string/byte keys.** New/changed: `core/ByteSequenceEncoder.java`,
+`strategy/MsdRadixSortStrategy.java`, `BeefSort.sortByteKeys(...)`, and `src/test/java/.../MsdRadixSortTest.java`.
+The mount truncated `BeefSort.java` (and the previously-edited `WorkloadAdaptation.java`) again, so the
+in-sandbox compile used reconstructions of those two; the host files are complete. Verified **23/23** (MSD +
+drift + co-opt) on the bootstrapped JDK 17. Commit host-side after `./gradlew build`:
+
+```powershell
+git add -A
+git commit -m "feat: MSD radix for string/byte keys (MsdRadixSortStrategy + ByteSequenceEncoder + BeefSort.sortByteKeys)"
 ```

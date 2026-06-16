@@ -16,8 +16,13 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   cost-model picks it over radix for wide-range integer keys, and it's a bandit arm. (A predictive
   RMI-with-cleanup variant remains a possible refinement.)
 - **ips4o / glidesort** as the parallel high-throughput workhorse above introsort.
-- **MSD radix** for string/byte keys; **entropy-aware radix** that picks base + pass-count from the
-  profiler's distinct-count and distribution.
+- ~~**MSD radix** for string/byte keys~~ — ✅ done: `MsdRadixSortStrategy` + `core/ByteSequenceEncoder`,
+  a stable iterative (explicit-stack) MSD radix over a byte-sequence view of the keys — end-sentinel bucket
+  so prefixes sort first, insertion base case over the real comparator. `forStrings()` (UTF-16 BE) reproduces
+  `String` natural order exactly; `forByteArrays()` + `byteArrayComparator()` give unsigned-lex. Via
+  `BeefSort.sortByteKeys(enc)`; `MsdRadixSortTest` green (random/unicode/pathological/stability/byte[]/facade).
+  Not auto-selected yet (the profiler/selector are single-`long`-key). **entropy-aware radix** (base +
+  pass-count from the profiler's distinct-count and distribution) is still open.
 - **External / out-of-core merge sort** (run generation → k-way merge to disk) for data > RAM,
   feeding CSRBT as a stream.
 - **Stable in-place merge** (block merge / WikiSort) to get stability without O(n) aux memory.

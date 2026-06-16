@@ -40,9 +40,12 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   `EnsembleOrderedSet` is an N-version *mirror* ensemble (ADR-003), **not** range-partitioned — every
   member holds the full set. So the win is a *parallel mirror* feed: `FeedMode.PARALLEL` / `ParallelFeeder`
   feed median-first via `add()`, and an ensemble built with `parallelFanOut()` fans each add out to all
-  mirror members concurrently (its own `MemberExecutor`, no SBS threads, no CSRBT change). `EnsembleParallelFeedTest`
-  proves it end-to-end. See [`PHASE3-PARALLEL-FEED.md`](PHASE3-PARALLEL-FEED.md) §0. A dedicated
-  `buildAllFromSorted` (O(n)/member instead of n median-adds) is the optional next step.
+  mirror members concurrently (its own `MemberExecutor`, no SBS threads). `EnsembleParallelFeedTest`
+  proves it end-to-end. See [`PHASE3-PARALLEL-FEED.md`](PHASE3-PARALLEL-FEED.md) §0. **Also done:** the
+  O(n)/member fast path — CSRBT `EnsembleOrderedSet.buildAllFromSorted` (gated to an empty MIRROR/VERIFIED
+  ensemble; fans `buildFromSorted` out to every member via the executor), which `ParallelFeeder` prefers
+  when the ensemble is empty, falling back to median-first `add` otherwise. Built + tested green
+  (JDK 17 + CSRBT in-sandbox, 63 tests).
 - **Co-optimization.** SBS profiler hands hints to CSRBT's `MorphController` ("uniform keys,
   read-heavy → weight-balanced") so the sort informs the tree's strategy. Two engines talking.
 - **Order-statistic-aware feeding.** Precompute ranks during the sort, pass them to CSRBT to validate

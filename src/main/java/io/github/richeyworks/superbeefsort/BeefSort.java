@@ -1,6 +1,7 @@
 package io.github.richeyworks.superbeefsort;
 
 import io.github.richeyworks.csrbt.OrderedSet;
+import io.github.richeyworks.csrbt.control.MorphPolicy;
 import io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet;
 import io.github.richeyworks.csrbt.strategy.TreeStrategy;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
@@ -8,6 +9,7 @@ import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
 import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
+import io.github.richeyworks.superbeefsort.csrbt.WorkloadAdaptation;
 import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
 import io.github.richeyworks.superbeefsort.engine.JobSpec;
 import io.github.richeyworks.superbeefsort.engine.SortRunResult;
@@ -137,6 +139,17 @@ public final class BeefSort<K> {
         EnsembleOrderedSet<K> ensemble = EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator);
         new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
         return ensemble;
+    }
+
+    /**
+     * Sort, construct the born-optimal {@link OrderedSet} (as {@link #buildOrderedSet()}), then wire it to
+     * CSRBT's self-adaptive control plane under {@code policy}: the returned {@link WorkloadAdaptation} lets
+     * you report live operations and have the tree re-tune its strategy to the observed workload — "born
+     * optimal AND wired to adapt" (docs/architecture-csrbt-integration.md §5). The access pattern must map
+     * to a morph-managed strategy (BALANCED/READ_HEAVY/SKEWED, or an RB/AVL/Splay/Hybrid targetStrategy).
+     */
+    public WorkloadAdaptation<K> buildAdaptive(MorphPolicy policy) {
+        return WorkloadAdaptation.attach(buildOrderedSet(), policy);
     }
 
     /** Sort only. */

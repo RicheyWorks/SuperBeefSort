@@ -3,6 +3,9 @@ package io.github.richeyworks.superbeefsort;
 import io.github.richeyworks.superbeefsort.core.ByteSequenceEncoder;
 import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
+import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
+import io.github.richeyworks.superbeefsort.engine.JobSpec;
+import io.github.richeyworks.superbeefsort.engine.SortRunResult;
 import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import org.junit.jupiter.api.Test;
 
@@ -167,5 +170,37 @@ class MsdRadixSortTest {
                 .source(input)
                 .sortByteKeys(ByteSequenceEncoder.forStrings());
         assertEquals(reference(input), out);
+    }
+
+    // ---- auto-selection ----------------------------------------------------
+
+    @Test
+    void engineAutoSelectsMsdRadixForByteSequenceKeys() {
+        Random r = new Random(42);
+        List<String> input = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            input.add(randString(r, 8, 10));
+        }
+        BeefSortEngine<String> engine = new BeefSortEngine<>(null, ByteSequenceEncoder.forStrings());
+        SortRunResult<String> result = engine.sort(input, Comparator.naturalOrder(), JobSpec.defaults());
+        assertEquals(MsdRadixSortStrategy.ID, result.plan().strategy(),
+                "engine must auto-select radix.msd when a ByteSequenceEncoder is present");
+        assertEquals(reference(input), result.sorted());
+    }
+
+    @Test
+    void beefSortFacadeAutoSelectsMsdRadix() {
+        Random r = new Random(77);
+        List<String> input = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            input.add(randString(r, 8, 10));
+        }
+        SortRunResult<String> result = BeefSort.with(Comparator.<String>naturalOrder())
+                .source(input)
+                .byteSequenceEncoder(ByteSequenceEncoder.forStrings())
+                .run();
+        assertEquals(MsdRadixSortStrategy.ID, result.plan().strategy(),
+                "facade must auto-select radix.msd when byteSequenceEncoder is set");
+        assertEquals(reference(input), result.sorted());
     }
 }

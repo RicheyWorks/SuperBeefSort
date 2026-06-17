@@ -24,18 +24,27 @@ public record DataProfile(
         Distribution distribution,
         int longestRun,
         long inversions,
-        boolean inversionsExact) {
+        boolean inversionsExact,
+        boolean hasByteSequenceKey) {
+
+    /** Back-compat for callers using the previous 10-arg canonical (adds {@code hasByteSequenceKey = false}). */
+    public DataProfile(int size, double sortednessRatio, boolean hasDuplicatesSampled, ProfileDepth depth,
+                       long distinctEstimate, KeyStats keyStats, Distribution distribution,
+                       int longestRun, long inversions, boolean inversionsExact) {
+        this(size, sortednessRatio, hasDuplicatesSampled, depth, distinctEstimate, keyStats,
+             distribution, longestRun, inversions, inversionsExact, false);
+    }
 
     /** Back-compat constructor for profilers that measure neither runs nor inversions (both default to unmeasured). */
     public DataProfile(int size, double sortednessRatio, boolean hasDuplicatesSampled, ProfileDepth depth,
                        long distinctEstimate, KeyStats keyStats, Distribution distribution) {
-        this(size, sortednessRatio, hasDuplicatesSampled, depth, distinctEstimate, keyStats, distribution, 0, -1L, false);
+        this(size, sortednessRatio, hasDuplicatesSampled, depth, distinctEstimate, keyStats, distribution, 0, -1L, false, false);
     }
 
     /** Back-compat constructor for profilers that measure runs but not inversions ({@code inversions} unmeasured). */
     public DataProfile(int size, double sortednessRatio, boolean hasDuplicatesSampled, ProfileDepth depth,
                        long distinctEstimate, KeyStats keyStats, Distribution distribution, int longestRun) {
-        this(size, sortednessRatio, hasDuplicatesSampled, depth, distinctEstimate, keyStats, distribution, longestRun, -1L, false);
+        this(size, sortednessRatio, hasDuplicatesSampled, depth, distinctEstimate, keyStats, distribution, longestRun, -1L, false, false);
     }
 
     /** True when at least 90% of adjacent pairs are already in order. */

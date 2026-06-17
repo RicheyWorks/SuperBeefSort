@@ -13,6 +13,7 @@ import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.LearnedSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.QuickSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 
@@ -160,7 +161,7 @@ public final class BanditStrategySelector implements LearningStrategySelector {
                 : p.size() <= 100_000 ? "medium" : "large";
         double s = p.sortednessRatio();
         String sort = s >= 0.90 ? "near" : s >= 0.60 ? "part" : "rand";
-        String keys = p.keyStats() != null ? "int" : "cmp";
+        String keys = p.keyStats() != null ? "int" : p.hasByteSequenceKey() ? "bseq" : "cmp";
         // A global-disorder band so inputs that look alike by adjacency but differ in true inversion
         // count (e.g. a far-apart swap) learn separately; "i?" keeps unmeasured profiles in one bucket.
         String inv;
@@ -182,6 +183,9 @@ public final class BanditStrategySelector implements LearningStrategySelector {
         arms.add(HeapSortStrategy.ID);
         if (p.size() <= 1_024) {
             arms.add(InsertionSortStrategy.ID); // adaptive on small/nearly-sorted; never on big inputs
+        }
+        if (p.hasByteSequenceKey()) {
+            arms.add(MsdRadixSortStrategy.ID);
         }
         KeyStats ks = p.keyStats();
         if (ks != null) {
@@ -213,6 +217,8 @@ public final class BanditStrategySelector implements LearningStrategySelector {
                 double range = ks != null ? (ks.span() + 1.0) : n;
                 return n + Math.max(1.0, range);
             }
+            case "radix.msd":
+                return 8.0 * n;                                  // ~8 byte passes, variable-length keys
             case "radix.lsd":
                 return 8.0 * n;                                  // ~8 fixed byte passes
             case "learned":

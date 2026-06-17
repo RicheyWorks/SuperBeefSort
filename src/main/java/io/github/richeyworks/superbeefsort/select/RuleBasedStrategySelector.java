@@ -10,6 +10,7 @@ import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
 
@@ -38,6 +39,9 @@ public final class RuleBasedStrategySelector implements StrategySelector {
     private SortPlan smart(DataProfile p, StrategyId fallback) {
         if (p.tiny()) {
             return new SortPlan(SortingNetworkStrategy.ID, FeedMode.BULK, fallback, "tiny input -> sorting network");
+        }
+        if (p.hasByteSequenceKey()) {
+            return new SortPlan(MsdRadixSortStrategy.ID, FeedMode.BULK, fallback, "byte-sequence keys -> MSD radix");
         }
         if (p.inversionsExact() && p.inversions() >= 0 && p.inversions() <= 2L * p.size()) {
             // Genuinely few inversions (a true global measure, not just adjacency): insertion sort is

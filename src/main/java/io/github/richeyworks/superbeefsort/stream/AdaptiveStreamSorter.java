@@ -1,6 +1,7 @@
 package io.github.richeyworks.superbeefsort.stream;
 
 import io.github.richeyworks.csrbt.OrderedSet;
+import io.github.richeyworks.superbeefsort.core.ByteSequenceEncoder;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
@@ -52,7 +53,8 @@ import java.util.OptionalLong;
 public final class AdaptiveStreamSorter<K> {
 
     private final Comparator<? super K> comparator;
-    private final KeyEncoder<K> keyEncoder; // may be null
+    private final KeyEncoder<K> keyEncoder;              // may be null
+    private final ByteSequenceEncoder<K> byteSequenceEncoder; // may be null
     private final StrategyRegistry registry;
     private final DataProfiler<K> profiler;
     private final StrategySelector selector;
@@ -70,6 +72,7 @@ public final class AdaptiveStreamSorter<K> {
     private AdaptiveStreamSorter(Builder<K> b, CsrbtTarget<K> target, int maxSize) {
         this.comparator = Objects.requireNonNull(b.comparator, "comparator");
         this.keyEncoder = b.keyEncoder;
+        this.byteSequenceEncoder = b.byteSequenceEncoder;
         this.registry = b.registry != null ? b.registry : StrategyRegistry.withDefaults();
         this.profiler = b.profiler != null ? b.profiler : new IntelligentDataProfiler<>();
         this.selector = b.selector != null ? b.selector : new RuleBasedStrategySelector();
@@ -91,7 +94,7 @@ public final class AdaptiveStreamSorter<K> {
      */
     public StreamSortResult<K> accept(List<K> batch) {
         int idx = ++batchIndex;
-        SortBuffer<K> buffer = SortBuffer.of(batch, comparator, keyEncoder);
+        SortBuffer<K> buffer = SortBuffer.of(batch, comparator, keyEncoder, byteSequenceEncoder);
 
         DataProfile profile = profiler.profile(buffer, ProfileDepth.SHALLOW);
         DriftVerdict verdict = detector.test(DriftSignal.from(profile));
@@ -150,12 +153,15 @@ public final class AdaptiveStreamSorter<K> {
         return target;
     }
 
-    // Mirrors BeefSortEngine.resolve: honor the plan, but fall back if the pick needs integer keys we lack.
+    // Mirrors BeefSortEngine.resolve: honor the plan, but fall back if the pick needs keys we lack.
     private SortStrategy<K> resolve(SortPlan plan, SortBuffer<K> buffer) {
         SortStrategy<K> chosen = registry.contains(plan.strategy())
                 ? registry.get(plan.strategy())
                 : registry.get(plan.fallback());
         if (chosen.capabilities().requiresIntegerKeys() && !buffer.hasKeyEncoder()) {
+            chosen = registry.get(plan.fallback());
+        }
+        if (chosen.capabilities().requiresByteSequenceEncoder() && !buffer.hasByteSequenceEncoder()) {
             chosen = registry.get(plan.fallback());
         }
         return chosen;
@@ -165,6 +171,7 @@ public final class AdaptiveStreamSorter<K> {
     public static final class Builder<K> {
         private final Comparator<? super K> comparator;
         private KeyEncoder<K> keyEncoder;
+        private ByteSequenceEncoder<K> byteSequenceEncoder;
         private StrategyRegistry registry;
         private DataProfiler<K> profiler;
         private StrategySelector selector;
@@ -180,6 +187,12 @@ public final class AdaptiveStreamSorter<K> {
         /** Supply an order-faithful integer encoding to unlock non-comparison sorts (counting / radix). */
         public Builder<K> keyEncoder(KeyEncoder<K> encoder) {
             this.keyEncoder = encoder;
+            return this;
+        }
+
+        /** Supply a byte-sequence encoder to enable automatic MSD radix selection on each batch. */
+        public Builder<K> byteSequenceEncoder(ByteSequenceEncoder<K> enc) {
+            this.byteSequenceEncoder = enc;
             return this;
         }
 

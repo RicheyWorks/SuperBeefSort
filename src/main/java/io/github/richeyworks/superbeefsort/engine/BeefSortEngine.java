@@ -1,5 +1,6 @@
 package io.github.richeyworks.superbeefsort.engine;
 
+import io.github.richeyworks.superbeefsort.core.ByteSequenceEncoder;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
@@ -42,32 +43,50 @@ public final class BeefSortEngine<K> {
     private final StrategyRegistry registry;
     private final DataProfiler<K> profiler;
     private final StrategySelector selector;
-    private final KeyEncoder<K> keyEncoder; // may be null
+    private final KeyEncoder<K> keyEncoder;              // may be null
+    private final ByteSequenceEncoder<K> byteSequenceEncoder; // may be null
 
     public BeefSortEngine() {
         this((KeyEncoder<K>) null);
     }
 
     public BeefSortEngine(KeyEncoder<K> keyEncoder) {
-        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(), new RuleBasedStrategySelector(),
-                keyEncoder);
+        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(),
+                new RuleBasedStrategySelector(), keyEncoder, null);
+    }
+
+    public BeefSortEngine(KeyEncoder<K> keyEncoder, ByteSequenceEncoder<K> byteSequenceEncoder) {
+        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(),
+                new RuleBasedStrategySelector(), keyEncoder, byteSequenceEncoder);
     }
 
     /** Custom selector with the default registry + profiler. */
     public BeefSortEngine(StrategySelector selector, KeyEncoder<K> keyEncoder) {
-        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(), selector, keyEncoder);
+        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(), selector, keyEncoder, null);
+    }
+
+    public BeefSortEngine(StrategySelector selector, KeyEncoder<K> keyEncoder,
+                          ByteSequenceEncoder<K> byteSequenceEncoder) {
+        this(StrategyRegistry.withDefaults(), new IntelligentDataProfiler<>(), selector,
+                keyEncoder, byteSequenceEncoder);
     }
 
     public BeefSortEngine(StrategyRegistry registry, DataProfiler<K> profiler, StrategySelector selector) {
-        this(registry, profiler, selector, null);
+        this(registry, profiler, selector, null, null);
     }
 
     public BeefSortEngine(StrategyRegistry registry, DataProfiler<K> profiler, StrategySelector selector,
                           KeyEncoder<K> keyEncoder) {
+        this(registry, profiler, selector, keyEncoder, null);
+    }
+
+    public BeefSortEngine(StrategyRegistry registry, DataProfiler<K> profiler, StrategySelector selector,
+                          KeyEncoder<K> keyEncoder, ByteSequenceEncoder<K> byteSequenceEncoder) {
         this.registry = registry;
         this.profiler = profiler;
         this.selector = selector;
         this.keyEncoder = keyEncoder;
+        this.byteSequenceEncoder = byteSequenceEncoder;
     }
 
     /** Sort only — returns the sorted list and metrics. */
@@ -75,7 +94,7 @@ public final class BeefSortEngine<K> {
         SortObserver obs = spec.observer();
         obs.onEvent(SortEvent.of(SortEvent.Type.JOB_STARTED, "n=" + data.size()));
 
-        SortBuffer<K> buffer = SortBuffer.of(data, comparator, keyEncoder);
+        SortBuffer<K> buffer = SortBuffer.of(data, comparator, keyEncoder, byteSequenceEncoder);
 
         DataProfile profile = profiler.profile(buffer, ProfileDepth.SHALLOW);
         obs.onEvent(SortEvent.of(SortEvent.Type.PROFILED,
@@ -135,6 +154,9 @@ public final class BeefSortEngine<K> {
                 ? registry.get(plan.strategy())
                 : registry.get(plan.fallback());
         if (chosen.capabilities().requiresIntegerKeys() && !buffer.hasKeyEncoder()) {
+            chosen = registry.get(plan.fallback());
+        }
+        if (chosen.capabilities().requiresByteSequenceEncoder() && !buffer.hasByteSequenceEncoder()) {
             chosen = registry.get(plan.fallback());
         }
         return chosen;

@@ -11,6 +11,7 @@ import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.LearnedSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 
 /**
@@ -75,6 +76,15 @@ public final class CostModelStrategySelector implements StrategySelector {
                 bestId = InsertionSortStrategy.ID;
                 bestCost = insertionCost;
                 why = "n+inversions insertion (" + p.inversions() + " inv)";
+            }
+        }
+
+        if (p.hasByteSequenceKey()) {
+            double msdCost = 8.0 * n; // ~8 byte passes, distribution-adaptive
+            if (msdCost < bestCost) {
+                bestId = MsdRadixSortStrategy.ID;
+                bestCost = msdCost;
+                why = "byte-sequence keys -> MSD radix";
             }
         }
 

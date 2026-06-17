@@ -25,7 +25,8 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
     public DataProfile profile(SortBuffer<K> b, ProfileDepth depth) {
         int n = b.size();
         if (n < 2) {
-            return new DataProfile(n, 1.0, false, depth, n, null, Distribution.UNKNOWN, n, 0L, true);
+            return new DataProfile(n, 1.0, false, depth, n, null, Distribution.UNKNOWN, n, 0L, true,
+                    b.hasByteSequenceEncoder());
         }
 
         long inOrder = 0;
@@ -65,7 +66,8 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
                 K v = b.get(i);
                 hll.add(mix(v == null ? 0L : v.hashCode()));
             }
-            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun, inversions, invExact);
+            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN,
+                    longestRun, inversions, invExact, b.hasByteSequenceEncoder());
         }
 
         long[] keys = new long[n];
@@ -78,7 +80,8 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             for (long k : keys) {
                 hll.add(mix(k));
             }
-            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN, longestRun, inversions, invExact);
+            return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), null, Distribution.UNKNOWN,
+                    longestRun, inversions, invExact, b.hasByteSequenceEncoder());
         }
 
         long min = Long.MAX_VALUE;
@@ -114,7 +117,8 @@ public final class IntelligentDataProfiler<K> implements DataProfiler<K> {
             distribution = classify(histogram, n);
         }
 
-        return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), keyStats, distribution, longestRun, inversions, invExact);
+        return new DataProfile(n, ratio, duplicates, depth, hll.estimate(), keyStats, distribution,
+                longestRun, inversions, invExact, b.hasByteSequenceEncoder());
     }
 
     /** Sample adjacent pairs and confirm the encoding agrees with the comparator's strict order. */

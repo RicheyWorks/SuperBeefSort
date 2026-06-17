@@ -21,22 +21,30 @@ public final class SortBuffer<K> {
 
     private final Object[] a;
     private final Comparator<? super K> comparator;
-    private final KeyEncoder<K> keyEncoder; // may be null
+    private final KeyEncoder<K> keyEncoder;          // may be null
+    private final ByteSequenceEncoder<K> byteSequenceEncoder; // may be null
     private long comparisons;
     private long moves;
 
-    private SortBuffer(Object[] a, Comparator<? super K> comparator, KeyEncoder<K> keyEncoder) {
+    private SortBuffer(Object[] a, Comparator<? super K> comparator,
+                       KeyEncoder<K> keyEncoder, ByteSequenceEncoder<K> byteSequenceEncoder) {
         this.a = a;
         this.comparator = comparator;
         this.keyEncoder = keyEncoder;
+        this.byteSequenceEncoder = byteSequenceEncoder;
     }
 
     public static <K> SortBuffer<K> of(List<K> data, Comparator<? super K> comparator) {
-        return new SortBuffer<>(data.toArray(), comparator, null);
+        return new SortBuffer<>(data.toArray(), comparator, null, null);
     }
 
     public static <K> SortBuffer<K> of(List<K> data, Comparator<? super K> comparator, KeyEncoder<K> keyEncoder) {
-        return new SortBuffer<>(data.toArray(), comparator, keyEncoder);
+        return new SortBuffer<>(data.toArray(), comparator, keyEncoder, null);
+    }
+
+    public static <K> SortBuffer<K> of(List<K> data, Comparator<? super K> comparator,
+                                        KeyEncoder<K> keyEncoder, ByteSequenceEncoder<K> byteSequenceEncoder) {
+        return new SortBuffer<>(data.toArray(), comparator, keyEncoder, byteSequenceEncoder);
     }
 
     public static <K> SortBuffer<K> of(K[] data, Comparator<? super K> comparator) {
@@ -46,7 +54,7 @@ public final class SortBuffer<K> {
     public static <K> SortBuffer<K> of(K[] data, Comparator<? super K> comparator, KeyEncoder<K> keyEncoder) {
         Object[] copy = new Object[data.length];
         System.arraycopy(data, 0, copy, 0, data.length);
-        return new SortBuffer<>(copy, comparator, keyEncoder);
+        return new SortBuffer<>(copy, comparator, keyEncoder, null);
     }
 
     public int size() {
@@ -104,6 +112,14 @@ public final class SortBuffer<K> {
 
     public boolean hasKeyEncoder() {
         return keyEncoder != null;
+    }
+
+    public ByteSequenceEncoder<K> byteSequenceEncoder() {
+        return byteSequenceEncoder;
+    }
+
+    public boolean hasByteSequenceEncoder() {
+        return byteSequenceEncoder != null;
     }
 
     /** Encode the element at index {@code i}. Caller must ensure {@link #hasKeyEncoder()}. */

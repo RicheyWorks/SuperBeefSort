@@ -33,21 +33,32 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
     private static final int BUCKETS = RADIX + 1; // bucket 0 = end-of-sequence; 1..256 = byte value + 1
     private static final int DEFAULT_CUTOFF = 24;
 
-    private final ByteSequenceEncoder<K> encoder;
+    private final ByteSequenceEncoder<K> encoder; // may be null when registered without one (reads from buffer)
     private final int cutoff;
+
+    /** Registry constructor: encoder is resolved from the {@link SortBuffer} at sort time. */
+    public MsdRadixSortStrategy() {
+        this(null, DEFAULT_CUTOFF);
+    }
 
     public MsdRadixSortStrategy(ByteSequenceEncoder<K> encoder) {
         this(encoder, DEFAULT_CUTOFF);
     }
 
     public MsdRadixSortStrategy(ByteSequenceEncoder<K> encoder, int cutoff) {
-        this.encoder = Objects.requireNonNull(encoder, "encoder");
+        this.encoder = encoder; // null allowed when used as registry singleton
         this.cutoff = Math.max(2, cutoff);
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public void sort(SortBuffer<K> b, SortContext context) {
+        ByteSequenceEncoder<K> enc = this.encoder != null ? this.encoder : b.byteSequenceEncoder();
+        if (enc == null) {
+            throw new IllegalStateException(
+                    "MsdRadixSortStrategy requires a ByteSequenceEncoder: supply one in the constructor "
+                    + "or via BeefSort.byteSequenceEncoder(...)");
+        }
         int n = b.size();
         if (n < 2) {
             return;
@@ -77,7 +88,7 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
 
             Arrays.fill(count, 0, BUCKETS + 1, 0);
             for (int i = lo; i < hi; i++) {
-                count[bucket((K) items[i], depth) + 1]++;
+                count[bucket((K) items[i], depth, enc) + 1]++;
             }
             for (int c = 0; c < BUCKETS; c++) {
                 count[c + 1] += count[c];
@@ -86,7 +97,7 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
             // distribution below can advance offsets without losing the bucket boundaries for recursion.
             int[] start = Arrays.copyOf(count, BUCKETS);
             for (int i = lo; i < hi; i++) {
-                int bkt = bucket((K) items[i], depth);
+                int bkt = bucket((K) items[i], depth, enc);
                 aux[lo + start[bkt]++] = items[i];
             }
             System.arraycopy(aux, lo, items, lo, len);
@@ -108,8 +119,8 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
         }
     }
 
-    private int bucket(K key, int depth) {
-        return depth < encoder.length(key) ? encoder.byteAt(key, depth) + 1 : 0;
+    private int bucket(K key, int depth, ByteSequenceEncoder<K> enc) {
+        return depth < enc.length(key) ? enc.byteAt(key, depth) + 1 : 0;
     }
 
     /** Stable insertion sort over the real comparator on {@code items[lo,hi)} — the small-range base case. */
@@ -129,7 +140,8 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
     @Override
     public StrategyCapabilities capabilities() {
         return StrategyCapabilities.builder()
-                .stable(true).inPlace(false).comparisonBased(false).build();
+                .stable(true).inPlace(false).comparisonBased(false)
+                .requiresByteSequenceEncoder(true).build();
     }
 
     @Override

@@ -12,6 +12,7 @@ public record StrategyCapabilities(
         boolean adaptive,
         boolean parallel,
         boolean requiresIntegerKeys,
+        boolean requiresByteSequenceEncoder,
         Runtime backingRuntime) {
 
     /** Which runtime actually executes the kernel. Phase 0/1 is all {@code JAVA}. */
@@ -28,6 +29,7 @@ public record StrategyCapabilities(
         private boolean adaptive = false;
         private boolean parallel = false;
         private boolean requiresIntegerKeys = false;
+        private boolean requiresByteSequenceEncoder = false;
         private Runtime backingRuntime = Runtime.JAVA;
 
         public Builder stable(boolean v) { this.stable = v; return this; }
@@ -36,11 +38,13 @@ public record StrategyCapabilities(
         public Builder adaptive(boolean v) { this.adaptive = v; return this; }
         public Builder parallel(boolean v) { this.parallel = v; return this; }
         public Builder requiresIntegerKeys(boolean v) { this.requiresIntegerKeys = v; return this; }
+        public Builder requiresByteSequenceEncoder(boolean v) { this.requiresByteSequenceEncoder = v; return this; }
         public Builder backingRuntime(Runtime v) { this.backingRuntime = v; return this; }
 
         public StrategyCapabilities build() {
             return new StrategyCapabilities(
-                    stable, inPlace, comparisonBased, adaptive, parallel, requiresIntegerKeys, backingRuntime);
+                    stable, inPlace, comparisonBased, adaptive, parallel,
+                    requiresIntegerKeys, requiresByteSequenceEncoder, backingRuntime);
         }
     }
 }

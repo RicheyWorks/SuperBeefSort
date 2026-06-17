@@ -60,7 +60,8 @@ public final class BeefSort<K> {
     private SelectionPolicy policy = SelectionPolicy.SMART;
     private FeedMode feedMode; // null -> the plan decides
     private SortObserver observer = SortObserver.NOOP;
-    private KeyEncoder<K> keyEncoder; // null -> comparison sorts only
+    private KeyEncoder<K> keyEncoder;             // null -> comparison sorts only
+    private ByteSequenceEncoder<K> byteSequenceEncoder; // null -> no MSD radix auto-selection
     private StrategySelector selector; // null -> engine default (rule-based)
     private OptionalLong randomSeed = OptionalLong.empty(); // present -> deterministic, reproducible runs
     private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for build*()
@@ -98,6 +99,16 @@ public final class BeefSort<K> {
     /** Supply an order-preserving integer encoding to enable non-comparison sorts. */
     public BeefSort<K> keyEncoder(KeyEncoder<K> encoder) {
         this.keyEncoder = encoder;
+        return this;
+    }
+
+    /**
+     * Supply a byte-sequence view of the keys (see {@link ByteSequenceEncoder#forStrings()}) to enable
+     * automatic MSD radix selection — the engine will profile, detect the encoder, and route to
+     * {@code radix.msd} without requiring an explicit {@link #sortByteKeys} call.
+     */
+    public BeefSort<K> byteSequenceEncoder(ByteSequenceEncoder<K> enc) {
+        this.byteSequenceEncoder = enc;
         return this;
     }
 
@@ -215,6 +226,7 @@ public final class BeefSort<K> {
     public AdaptiveStreamSorter<K> adaptiveStream(OrderedSet<K> target, int maxSize, DriftDetector detector) {
         return AdaptiveStreamSorter.<K>builder(comparator)
                 .keyEncoder(keyEncoder)
+                .byteSequenceEncoder(byteSequenceEncoder)
                 .selector(selector)
                 .policy(policy)
                 .detector(detector)
@@ -252,8 +264,8 @@ public final class BeefSort<K> {
 
     private BeefSortEngine<K> engine() {
         return selector == null
-                ? new BeefSortEngine<>(keyEncoder)
-                : new BeefSortEngine<>(selector, keyEncoder);
+                ? new BeefSortEngine<>(keyEncoder, byteSequenceEncoder)
+                : new BeefSortEngine<>(selector, keyEncoder, byteSequenceEncoder);
     }
 
     /** Linear de-dup of an already-ascending run under {@link #comparator}. */

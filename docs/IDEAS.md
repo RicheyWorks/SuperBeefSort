@@ -107,7 +107,10 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
 ## Productization
 
 - Publish `csrbt-core` + `superbeefsort` to Maven Central (CSRBT already has the publishing plumbing).
-- Stream integration: `Collectors.toOrderedSet(...)`, a parallel `Stream` sink that feeds CSRBT.
+- ~~Stream integration: `Collectors.toOrderedSet(...)`, a parallel `Stream` sink that feeds CSRBT.~~ — ✅ done:
+  `BeefCollectors.toOrderedSet(...)` / `toSortedList(...)` (with `KeyEncoder` + `AccessPolicy` overloads) gather a
+  stream and run the full pipeline once in the finisher; correct under parallel streams (combiner merges in
+  encounter order, the sort happens once). `BeefCollectorsTest` green.
 
 ## Top picks
 

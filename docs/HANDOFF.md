@@ -6,9 +6,9 @@ FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort,
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
 web step-visualizer with self-contained record/replay; a bounded streaming feed; and **concept-drift-aware
 adaptive streaming** that re-selects the sort strategy mid-stream; and **profile-guided co-optimization** (the
-sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys**. Everything is `./gradlew build` **green**, verified
+sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys** and **Streams-API collectors**. Everything is `./gradlew build` **green**, verified
 against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox); the new drift + co-optimization
-suites are **23/23 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`), so run `./gradlew build`
+suites are **27/27 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`), so run `./gradlew build`
 host-side for the full count. See
 the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
 at full strength next.
@@ -144,7 +144,7 @@ commit is pushed.
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
 `BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`, `DifferentialTest`, `ChaosTest`,
-`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`; CSRBT: `BulkBuildTest`.
+`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`; CSRBT: `BulkBuildTest`.
 
 **Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
 the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
@@ -229,6 +229,18 @@ so it's an explicit-construction strategy for now (profiler/selector integration
 base/pass-count choice are the natural follow-ups). Covered by `MsdRadixSortTest` (random small/large alphabets
 + BMP/unicode, pathological prefix/empty/duplicate shapes, an explicit stability check, byte[] keys, and the
 facade) — compiled with SBS main on the bootstrapped JDK 17, **6/6 green** (full new-feature run 23/23).
+
+**Stream integration (`BeefCollectors`):** idiomatic `java.util.stream.Collector`s so a stream collapses into a
+sorted `List` or a born-optimal CSRBT `OrderedSet`. `toSortedList(cmp[, enc])` (sort-only, duplicates kept) and
+`toOrderedSet(cmp[, enc[, access]])` (O(n) born-optimal build, de-duplicated) accumulate elements into a list
+(supplier/accumulator/combiner) and run the engine once in the finisher. They are ordinary, non-concurrent
+collectors: under a parallel stream the per-thread lists are merged by the combiner in encounter order and the
+single finisher does the sort, so results are correct and the sort stays stable; CSRBT is fed once,
+single-threaded. Purely additive (no engine/core changes). Covered by `BeefCollectorsTest` (sequential +
+parallel, both collectors, the `KeyEncoder` and `AccessPolicy` paths incl. `READ_HEAVY` born AVL) — **4/4 green**
+(full run **27/27** on the bootstrapped JDK 17). A subtle gotcha caught in verification: `Collector.of(...)` needs
+explicit type witnesses (`Collector.<K, ArrayList<K>, …>of(...)` + `BeefSort.<K>with(...)`) or `K` infers to
+`Object` and the finisher won't type-check.
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -372,4 +384,13 @@ drift + co-opt) on the bootstrapped JDK 17. Commit host-side after `./gradlew bu
 ```powershell
 git add -A
 git commit -m "feat: MSD radix for string/byte keys (MsdRadixSortStrategy + ByteSequenceEncoder + BeefSort.sortByteKeys)"
+```
+
+**This session also added Streams-API collectors.** New, purely additive: `BeefCollectors.java` +
+`src/test/java/.../BeefCollectorsTest.java` (no other files changed). Verified **27/27** on the bootstrapped
+JDK 17. Commit host-side after `./gradlew build`:
+
+```powershell
+git add -A
+git commit -m "feat: BeefCollectors - Streams-API collectors (toOrderedSet / toSortedList)"
 ```

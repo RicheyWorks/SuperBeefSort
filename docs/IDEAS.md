@@ -21,8 +21,12 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   so prefixes sort first, insertion base case over the real comparator. `forStrings()` (UTF-16 BE) reproduces
   `String` natural order exactly; `forByteArrays()` + `byteArrayComparator()` give unsigned-lex. Via
   `BeefSort.sortByteKeys(enc)`; `MsdRadixSortTest` green (random/unicode/pathological/stability/byte[]/facade).
-  Not auto-selected yet (the profiler/selector are single-`long`-key). **entropy-aware radix** (base +
-  pass-count from the profiler's distinct-count and distribution) is still open.
+  Not auto-selected yet (the profiler/selector are single-`long`-key).
+- ~~**entropy-aware radix** that picks base + pass-count from the data.~~ — ✅ done: `RadixPlan.forWidth(bits, n)`
+  chooses bits-per-pass + pass-count to minimize `passes*(n + 2^b)`, and `radix.lsd` now **offsets keys by the
+  unsigned min** and sorts over only the range's significant bits — so a narrow band of large values takes ~1
+  pass instead of 8 (the sign flip used to force a full schedule). Folded into `radix.lsd` (same id/stability);
+  `RadixPlanTest` + `AdaptiveRadixTest` green.
 - **External / out-of-core merge sort** (run generation → k-way merge to disk) for data > RAM,
   feeding CSRBT as a stream.
 - **Stable in-place merge** (block merge / WikiSort) to get stability without O(n) aux memory.

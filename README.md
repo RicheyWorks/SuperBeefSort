@@ -32,7 +32,7 @@ interfaces.
 | 2 | Rust radix kernel via Panama FFM (Java fallback retained) | **PoC proven** ([`phase2-ffm/`](phase2-ffm/)); productization planned |
 | 3 | Ensemble **parallel mirror feed** (O(n)/member bulk-build) · **bounded streaming feed** with health backpressure · born-optimal CSRBT builds + adaptation | ✅ done |
 | 4–5 | Python ML selection · distributed / external sort | planned |
-| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
+| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **entropy-aware LSD radix** (offset-by-min, adaptive base) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
 
 ## Build & test
 
@@ -99,7 +99,7 @@ One pipeline, every stage pluggable:
 |-------|-----------|----------|
 | Profile | `IntelligentDataProfiler` | sortedness + longest run + a true **inversion count** (global disorder, exact or sampled), distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
 | Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; genuinely-few-inversion inputs route to adaptive insertion, and the cost-model/bandit can pick the learned sort — the bandit learns the cheapest per context from observed cost |
-| Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · 3-way quick · heap · intro · JDK · counting · LSD radix · **MSD radix** (string/byte keys) · **learned** (distribution-adaptive sample sort) |
+| Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · 3-way quick · heap · intro · JDK · counting · **entropy-aware LSD radix** · **MSD radix** (string/byte keys) · **learned** (distribution-adaptive sample sort) |
 | Feed | `SortFeeder` + `CsrbtTarget` | `BulkBuildFeeder` (O(n)) · `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `PrecisionFeeder` (validate-every-insert) · `ParallelFeeder` (mirror-ensemble fan-out) · `StreamingFeeder` (bounded sliding window) · `DirectFeeder` |
 
 ### Design notes

@@ -6,9 +6,9 @@ FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort,
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
 web step-visualizer with self-contained record/replay; a bounded streaming feed; and **concept-drift-aware
 adaptive streaming** that re-selects the sort strategy mid-stream; and **profile-guided co-optimization** (the
-sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys** and **Streams-API collectors**. Everything is `./gradlew build` **green**, verified
+sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys**, **entropy-aware LSD radix**, and **Streams-API collectors**. Everything is `./gradlew build` **green**, verified
 against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox); the new drift + co-optimization
-suites are **27/27 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`), so run `./gradlew build`
+suites are **38/38 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`, `RadixPlanTest`, `AdaptiveRadixTest`), so run `./gradlew build`
 host-side for the full count. See
 the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
 at full strength next.
@@ -144,7 +144,7 @@ commit is pushed.
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
 `BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`, `DifferentialTest`, `ChaosTest`,
-`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`; CSRBT: `BulkBuildTest`.
+`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`, `RadixPlanTest`, `AdaptiveRadixTest`; CSRBT: `BulkBuildTest`.
 
 **Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
 the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
@@ -241,6 +241,17 @@ parallel, both collectors, the `KeyEncoder` and `AccessPolicy` paths incl. `READ
 (full run **27/27** on the bootstrapped JDK 17). A subtle gotcha caught in verification: `Collector.of(...)` needs
 explicit type witnesses (`Collector.<K, ArrayList<K>, …>of(...)` + `BeefSort.<K>with(...)`) or `K` infers to
 `Object` and the finisher won't type-check.
+
+**Entropy-aware radix (`RadixPlan`):** `radix.lsd` is now adaptive instead of fixed 8-bit / 8-pass. It
+sign-flips keys for unsigned order, **offsets them by the unsigned minimum**, and sorts over only the
+significant bits of the key *range*; `RadixPlan.forWidth(significantBits, n)` picks the bits-per-pass + pass
+count that minimize `passes*(n + 2^b)`. The offset is the real fix: the sign flip leaves the high bit set, so
+the old schedule ran a full eight passes even for a narrow band of large values — now ids in
+`[1_000_000, 1_001_000]` sort in one ~10-bit pass. Same id / capabilities / stability (`radix.lsd`, stable,
+out-of-place, requires a `KeyEncoder`), so all three selectors and the existing radix tests are untouched.
+Covered by `RadixPlanTest` (planner adapts to width/n and always covers the width) and `AdaptiveRadixTest`
+(narrow-high-magnitude, full signed range with negatives, longs, MIN/MAX, stability) — **11/11 green**, full
+run **38/38** on the bootstrapped JDK 17.
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -393,4 +404,14 @@ JDK 17. Commit host-side after `./gradlew build`:
 ```powershell
 git add -A
 git commit -m "feat: BeefCollectors - Streams-API collectors (toOrderedSet / toSortedList)"
+```
+
+**This session also made `radix.lsd` entropy-aware.** Changed `strategy/RadixSortStrategy.java` (offset-by-min +
+adaptive base), new `strategy/RadixPlan.java`, new `RadixPlanTest` + `AdaptiveRadixTest`. No id/selector changes.
+Verified **38/38** on the bootstrapped JDK 17 (the mount truncated the rewritten `RadixSortStrategy.java` again —
+compiled a reconstruction; host file is complete). Commit host-side after `./gradlew build`:
+
+```powershell
+git add -A
+git commit -m "perf: entropy-aware LSD radix (RadixPlan: offset-by-min + adaptive base/pass-count)"
 ```

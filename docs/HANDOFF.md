@@ -6,9 +6,9 @@ FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort,
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
 web step-visualizer with self-contained record/replay; a bounded streaming feed; and **concept-drift-aware
 adaptive streaming** that re-selects the sort strategy mid-stream; and **profile-guided co-optimization** (the
-sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys**, **entropy-aware LSD radix**, and **Streams-API collectors**. Everything is `./gradlew build` **green**, verified
+sort's data profile primes the tree's strategy adaptation); plus **MSD radix for string/byte keys**, **entropy-aware LSD radix**, a **stable in-place merge**, and **Streams-API collectors**. Everything is `./gradlew build` **green**, verified
 against real CSRBT from a clean clone (JDK 17/21 + Rust bootstrapped in-sandbox); the new drift + co-optimization
-suites are **38/38 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`, `RadixPlanTest`, `AdaptiveRadixTest`), so run `./gradlew build`
+suites are **42/42 green** the same way (`ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`, `RadixPlanTest`, `AdaptiveRadixTest`, `InPlaceMergeSortTest`), so run `./gradlew build`
 host-side for the full count. See
 the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
 at full strength next.
@@ -144,7 +144,7 @@ commit is pushed.
 Tests: `SortStrategyPropertyTest`, `EngineFeedCsrbtTest` (feeds a real `OrderedSet`),
 `NonComparisonSortPropertyTest`, `Phase1IntelligenceTest`, `BulkFeedTest`, `CostModelSelectorTest`,
 `BanditSelectorTest`, `SortingNetworkTest`, `InversionCountTest`, `DifferentialTest`, `ChaosTest`,
-`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`, `RadixPlanTest`, `AdaptiveRadixTest`; CSRBT: `BulkBuildTest`.
+`DeterministicSortTest`, `LearnedSortPropertyTest`, `StreamingFeederTest`, `ConceptDriftTest`, `CoOptimizationTest`, `MsdRadixSortTest`, `BeefCollectorsTest`, `RadixPlanTest`, `AdaptiveRadixTest`, `InPlaceMergeSortTest`; CSRBT: `BulkBuildTest`.
 
 **Robustness testing (differential + chaos):** `DifferentialTest` pits every comparison strategy against
 the JDK reference sort over jqwik duplicate-heavy inputs plus a fixed battery of pathological shapes
@@ -252,6 +252,18 @@ out-of-place, requires a `KeyEncoder`), so all three selectors and the existing 
 Covered by `RadixPlanTest` (planner adapts to width/n and always covers the width) and `AdaptiveRadixTest`
 (narrow-high-magnitude, full signed range with negatives, longs, MIN/MAX, stability) — **11/11 green**, full
 run **38/38** on the bootstrapped JDK 17.
+
+**Stable in-place merge (`InPlaceMergeSortStrategy`, `merge.inplace`):** a stable sort with O(1) auxiliary
+memory — the missing point in the design space (the existing `merge` is stable but O(n) aux; insertion is
+in-place but O(n²)). It merges two adjacent runs with the classic rotation-based symmetric algorithm: bisect
+the larger run, binary-search the split in the other (`lower_bound` when the left run is larger, `upper_bound`
+otherwise — that choice is what keeps it stable), three-reversal-rotate the middle blocks past each other, and
+recurse. Time trades for space: O(n log² n) from the rotations, O(1) extra. An insertion base case and an
+already-ordered-seam skip make it adaptive on nearly-sorted input; recursion depth stays logarithmic.
+Registered in `BuiltinStrategyProvider` and added to the `DifferentialTest` battery; **not** auto-selected — the
+`STABLE` policy keeps the faster O(n)-aux `merge`, so `merge.inplace` is the explicit memory-constrained option.
+Covered by `InPlaceMergeSortTest` (random + the pathological shape battery, explicit stability, capability
+flags) — **4/4 green**, full run **42/42** on the bootstrapped JDK 17.
 
 ## Key decisions & gotchas (read before changing things)
 
@@ -414,4 +426,14 @@ compiled a reconstruction; host file is complete). Commit host-side after `./gra
 ```powershell
 git add -A
 git commit -m "perf: entropy-aware LSD radix (RadixPlan: offset-by-min + adaptive base/pass-count)"
+```
+
+**This session also added a stable in-place merge.** New `strategy/InPlaceMergeSortStrategy.java` +
+`InPlaceMergeSortTest.java`; registered in `BuiltinStrategyProvider` and added to `DifferentialTest`'s list.
+Verified **42/42** on the bootstrapped JDK 17 (the mount truncated `BuiltinStrategyProvider.java` after the
+edit — compiled a reconstruction; host file is complete). Commit host-side after `./gradlew build`:
+
+```powershell
+git add -A
+git commit -m "feat: InPlaceMergeSortStrategy - stable merge with O(1) auxiliary memory"
 ```

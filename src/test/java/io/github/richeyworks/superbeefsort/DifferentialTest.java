@@ -4,6 +4,7 @@ import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.HeapSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.InPlaceMergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
@@ -39,6 +40,7 @@ class DifferentialTest {
                 new InsertionSortStrategy<>(),
                 new SortingNetworkStrategy<>(),
                 new MergeSortStrategy<>(),
+                new InPlaceMergeSortStrategy<>(),
                 new QuickSortStrategy<>(),
                 new HeapSortStrategy<>(),
                 new IntroSortStrategy<>(),

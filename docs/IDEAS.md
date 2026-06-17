@@ -29,7 +29,10 @@ These are a menu, not a commitment — see "Top picks" at the bottom.
   `RadixPlanTest` + `AdaptiveRadixTest` green.
 - **External / out-of-core merge sort** (run generation → k-way merge to disk) for data > RAM,
   feeding CSRBT as a stream.
-- **Stable in-place merge** (block merge / WikiSort) to get stability without O(n) aux memory.
+- ~~**Stable in-place merge** to get stability without O(n) aux memory.~~ — ✅ done:
+  `InPlaceMergeSortStrategy` (`merge.inplace`), the rotation-based symmetric merge (lower/upper-bound split +
+  three-reversal rotate) — stable, O(1) aux, O(n log² n). Registered + in the differential battery;
+  `InPlaceMergeSortTest` green. (The O(n log n) block-merge / WikiSort refinement remains a possible follow-up.)
 
 ## Intelligence layer (make it self-improving)
 

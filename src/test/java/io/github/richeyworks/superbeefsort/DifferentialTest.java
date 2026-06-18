@@ -11,6 +11,7 @@ import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.QuickSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
+import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
 import net.jqwik.api.ForAll;
@@ -41,6 +42,7 @@ class DifferentialTest {
                 new SortingNetworkStrategy<>(),
                 new MergeSortStrategy<>(),
                 new InPlaceMergeSortStrategy<>(),
+                new WikiSortStrategy<>(),
                 new QuickSortStrategy<>(),
                 new HeapSortStrategy<>(),
                 new IntroSortStrategy<>(),

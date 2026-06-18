@@ -60,4 +60,28 @@ class CostModelSelectorTest {
         // even on nearly-sorted data, because counting ignores existing order and is linear.
         assertEquals("counting", pick(profile(50_000, 0.98, new KeyStats(0, 50_000, true))));
     }
+
+    // ---- STABLE policy: prefers the in-place WikiSort for large, mostly-distinct inputs ----
+
+    private String pickStable(DataProfile p) {
+        return selector.select(p, SelectionPolicy.STABLE, registry).strategy().value();
+    }
+
+    @Test
+    void largeDistinctStablePicksWikiSort() {
+        // profile() sets distinctEstimate == n, so this is ~all-distinct and above the size threshold
+        assertEquals("merge.wiki", pickStable(profile(200_000, 0.5, null)));
+    }
+
+    @Test
+    void largeDuplicateHeavyStableStaysMergeSort() {
+        // few distinct values -> WikiSort would only fall back to a rotation merge, so plain merge wins
+        DataProfile dupHeavy = new DataProfile(200_000, 0.5, true, ProfileDepth.SHALLOW, 100, null, Distribution.UNKNOWN);
+        assertEquals("merge", pickStable(dupHeavy));
+    }
+
+    @Test
+    void smallStableStaysMergeSort() {
+        assertEquals("merge", pickStable(profile(1_000, 0.5, null)));
+    }
 }

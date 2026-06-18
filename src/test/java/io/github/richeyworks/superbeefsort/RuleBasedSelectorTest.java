@@ -45,4 +45,32 @@ class RuleBasedSelectorTest {
         // not nearly sorted, longest run only 10%, no integer keys -> general comparison path
         assertEquals("intro", pick(profile(1000, 0.5, 100)));
     }
+
+    // ---- STABLE policy: prefers the in-place WikiSort for large, mostly-distinct inputs ----
+
+    private String pickStable(DataProfile p) {
+        return selector.select(p, SelectionPolicy.STABLE, registry).strategy().value();
+    }
+
+    private static DataProfile profileDistinct(int n, long distinctEstimate) {
+        return new DataProfile(n, 0.5, false, ProfileDepth.SHALLOW, distinctEstimate, null, Distribution.UNKNOWN);
+    }
+
+    @Test
+    void largeDistinctStablePicksWikiSort() {
+        // big input, ~all distinct -> WikiSort's block-merge engages: stable, O(1) aux, O(n log n)
+        assertEquals("merge.wiki", pickStable(profileDistinct(200_000, 200_000)));
+    }
+
+    @Test
+    void largeDuplicateHeavyStableStaysMergeSort() {
+        // few distinct values -> WikiSort would only fall back to a rotation merge, so plain merge wins
+        assertEquals("merge", pickStable(profileDistinct(200_000, 100)));
+    }
+
+    @Test
+    void smallStableStaysMergeSort() {
+        // below the size threshold, plain merge sort's O(n) scratch is not worth avoiding
+        assertEquals("merge", pickStable(profileDistinct(1_000, 1_000)));
+    }
 }

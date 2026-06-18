@@ -13,6 +13,7 @@ import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
+import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 
 /**
  * Capability/heuristic selection. Phase 1 adds the non-comparison branch: when the profiler reports
@@ -25,15 +26,34 @@ import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
 public final class RuleBasedStrategySelector implements StrategySelector {
 
     private static final long COUNTING_RANGE_FLOOR = 1L << 16;
+    // Above this size, plain merge sort's O(n) scratch is itself a cost worth avoiding: for mostly-distinct
+    // data the in-place WikiSort keeps stability and O(n log n) work with O(1) auxiliary memory.
+    private static final int WIKI_MIN_SIZE = 1 << 17; // 131_072
 
     @Override
     public SortPlan select(DataProfile profile, SelectionPolicy policy, StrategyRegistry registry) {
         StrategyId fallback = IntroSortStrategy.ID;
         return switch (policy) {
             case FIXED_INTRO -> new SortPlan(IntroSortStrategy.ID, FeedMode.BULK, fallback, "fixed introsort");
-            case STABLE -> new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested");
+            case STABLE -> stable(profile, fallback);
             case SMART -> smart(profile, fallback);
         };
+    }
+
+    /**
+     * Stable policy: plain merge sort by default (fast and stable). For very large, mostly-distinct inputs
+     * prefer the in-place WikiSort instead — it keeps stability and O(n&nbsp;log&nbsp;n) work while dropping
+     * merge's O(n) scratch to O(1), which matters at scale. WikiSort's block-merge fast path only engages on
+     * distinct data; duplicate-heavy input falls back to a rotation merge with no win over plain merge, so
+     * those stay on merge.
+     */
+    private SortPlan stable(DataProfile p, StrategyId fallback) {
+        if (p.size() >= WIKI_MIN_SIZE && p.distinctEstimate() >= (long) (0.9 * p.size())) {
+            return new SortPlan(WikiSortStrategy.ID, FeedMode.BULK, fallback,
+                    "large mostly-distinct stable (" + p.size() + " elems, ~" + p.distinctEstimate()
+                            + " distinct) -> WikiSort (stable, O(1) aux, O(n log n))");
+        }
+        return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");
     }
 
     private SortPlan smart(DataProfile p, StrategyId fallback) {

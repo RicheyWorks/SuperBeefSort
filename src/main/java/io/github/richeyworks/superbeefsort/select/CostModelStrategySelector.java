@@ -13,6 +13,7 @@ import io.github.richeyworks.superbeefsort.strategy.LearnedSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 
 /**
  * Selects by estimating each applicable strategy's cost from the {@link DataProfile} and choosing the
@@ -38,6 +39,7 @@ public final class CostModelStrategySelector implements StrategySelector {
     private static final double RADIX_PASSES = 8.0;       // signed 64-bit keys -> ~8 byte passes
     private static final double LEARNED_PER_ITEM = 5.0;   // learned bucket sort: ~linear when buckets balance
     private static final double TIMSORT_OVERHEAD = 1.3;   // merge buffer allocations vs in-place sorts
+    private static final int WIKI_MIN_SIZE = 1 << 17;     // 131_072: above here, merge's O(n) scratch is worth avoiding
 
     @Override
     public SortPlan select(DataProfile p, SelectionPolicy policy, StrategyRegistry registry) {
@@ -46,7 +48,7 @@ public final class CostModelStrategySelector implements StrategySelector {
             return new SortPlan(IntroSortStrategy.ID, FeedMode.BULK, fallback, "fixed introsort");
         }
         if (policy == SelectionPolicy.STABLE) {
-            return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested");
+            return stable(p, fallback);
         }
 
         int n = p.size();
@@ -116,5 +118,20 @@ public final class CostModelStrategySelector implements StrategySelector {
         }
 
         return new SortPlan(bestId, FeedMode.BULK, fallback, "cost model -> " + why);
+    }
+
+    /**
+     * Stable policy: plain merge sort by default, but the in-place WikiSort for large, mostly-distinct
+     * inputs — stable and O(n&nbsp;log&nbsp;n) with O(1) auxiliary memory, trading a higher comparison
+     * constant to avoid merge's O(n) scratch at scale. Mirrors {@link RuleBasedStrategySelector}; the
+     * cost model's comparisons+moves objective never picks WikiSort on its own (plain merge dominates it
+     * on both), so it is offered only where stability is the requirement.
+     */
+    private SortPlan stable(DataProfile p, StrategyId fallback) {
+        if (p.size() >= WIKI_MIN_SIZE && p.distinctEstimate() >= (long) (0.9 * p.size())) {
+            return new SortPlan(WikiSortStrategy.ID, FeedMode.BULK, fallback,
+                    "large mostly-distinct stable (" + p.size() + " elems) -> WikiSort (O(1) aux, O(n log n))");
+        }
+        return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");
     }
 }

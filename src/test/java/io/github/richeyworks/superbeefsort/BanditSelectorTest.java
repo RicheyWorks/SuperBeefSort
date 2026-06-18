@@ -121,4 +121,13 @@ class BanditSelectorTest {
         assertEquals("intro", bandit.select(p, SelectionPolicy.FIXED_INTRO, registry).strategy().value());
         assertEquals("merge", bandit.select(p, SelectionPolicy.STABLE, registry).strategy().value());
     }
+
+    @Test
+    void stablePolicyRoutesLargeDistinctToWikiSort() {
+        // STABLE delegates to the rule-based base, which prefers the in-place WikiSort for large,
+        // mostly-distinct inputs (profile() sets distinctEstimate == n).
+        BanditStrategySelector bandit = new BanditStrategySelector();
+        DataProfile big = profile(200_000, 0.5, null);
+        assertEquals("merge.wiki", bandit.select(big, SelectionPolicy.STABLE, registry).strategy().value());
+    }
 }

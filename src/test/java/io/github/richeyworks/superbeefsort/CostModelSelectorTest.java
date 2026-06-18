@@ -69,14 +69,15 @@ class CostModelSelectorTest {
 
     @Test
     void largeDistinctStablePicksWikiSort() {
-        // profile() sets distinctEstimate == n, so this is ~all-distinct and above the size threshold
-        assertEquals("merge.wiki", pickStable(profile(200_000, 0.5, null)));
+        // profile() sets distinctEstimate == n, so this is ~all-distinct and above the (2^21) size threshold
+        assertEquals("merge.wiki", pickStable(profile(3_000_000, 0.5, null)));
     }
 
     @Test
     void largeDuplicateHeavyStableStaysMergeSort() {
-        // few distinct values -> WikiSort would only fall back to a rotation merge, so plain merge wins
-        DataProfile dupHeavy = new DataProfile(200_000, 0.5, true, ProfileDepth.SHALLOW, 100, null, Distribution.UNKNOWN);
+        // above the size threshold but few distinct values -> WikiSort would only fall back to a rotation
+        // merge, so plain merge stays preferred
+        DataProfile dupHeavy = new DataProfile(3_000_000, 0.5, true, ProfileDepth.SHALLOW, 100, null, Distribution.UNKNOWN);
         assertEquals("merge", pickStable(dupHeavy));
     }
 

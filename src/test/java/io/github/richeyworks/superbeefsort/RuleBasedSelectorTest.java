@@ -58,14 +58,15 @@ class RuleBasedSelectorTest {
 
     @Test
     void largeDistinctStablePicksWikiSort() {
-        // big input, ~all distinct -> WikiSort's block-merge engages: stable, O(1) aux, O(n log n)
-        assertEquals("merge.wiki", pickStable(profileDistinct(200_000, 200_000)));
+        // very large (>= 2^21), ~all distinct -> WikiSort's block-merge engages: stable, O(1) aux, O(n log n)
+        assertEquals("merge.wiki", pickStable(profileDistinct(3_000_000, 3_000_000)));
     }
 
     @Test
     void largeDuplicateHeavyStableStaysMergeSort() {
-        // few distinct values -> WikiSort would only fall back to a rotation merge, so plain merge wins
-        assertEquals("merge", pickStable(profileDistinct(200_000, 100)));
+        // above the size threshold but few distinct values -> WikiSort would only fall back to a rotation
+        // merge, so plain merge stays preferred (isolates the distinctness gate from the size gate)
+        assertEquals("merge", pickStable(profileDistinct(3_000_000, 100)));
     }
 
     @Test

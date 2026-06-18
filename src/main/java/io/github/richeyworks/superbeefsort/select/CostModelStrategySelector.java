@@ -39,7 +39,7 @@ public final class CostModelStrategySelector implements StrategySelector {
     private static final double RADIX_PASSES = 8.0;       // signed 64-bit keys -> ~8 byte passes
     private static final double LEARNED_PER_ITEM = 5.0;   // learned bucket sort: ~linear when buckets balance
     private static final double TIMSORT_OVERHEAD = 1.3;   // merge buffer allocations vs in-place sorts
-    private static final int WIKI_MIN_SIZE = 1 << 17;     // 131_072: above here, merge's O(n) scratch is worth avoiding
+    private static final int WIKI_MIN_SIZE = 1 << 21;     // 2_097_152: only here does avoiding merge's ~16MB+ O(n) scratch beat its ~2-3x wall-clock edge
 
     @Override
     public SortPlan select(DataProfile p, SelectionPolicy policy, StrategyRegistry registry) {

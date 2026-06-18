@@ -26,9 +26,11 @@ import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 public final class RuleBasedStrategySelector implements StrategySelector {
 
     private static final long COUNTING_RANGE_FLOOR = 1L << 16;
-    // Above this size, plain merge sort's O(n) scratch is itself a cost worth avoiding: for mostly-distinct
-    // data the in-place WikiSort keeps stability and O(n log n) work with O(1) auxiliary memory.
-    private static final int WIKI_MIN_SIZE = 1 << 17; // 131_072
+    // WikiSort is ~2-3x slower than plain merge in wall-clock at every size (a higher comparison
+    // constant), so it is only worth choosing when merge's O(n) scratch is genuinely prohibitive. At
+    // 2^21 elements that scratch is ~16 MB+ of references; below this, plain merge is faster and the
+    // memory saving is negligible. WikiSort here is purely the stable + O(1)-aux specialist for huge runs.
+    private static final int WIKI_MIN_SIZE = 1 << 21; // 2_097_152
 
     @Override
     public SortPlan select(DataProfile profile, SelectionPolicy policy, StrategyRegistry registry) {

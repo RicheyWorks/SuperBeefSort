@@ -49,4 +49,21 @@ jmh {
     iterations = 5
     resultFormat = "JSON"
     resultsFile = layout.buildDirectory.file("reports/jmh/results.json")
+    // Optional filter so you can run a subset instead of the whole suite (~40 min). Examples:
+    //   ./gradlew jmh -Pbench=SortStrategyBenchmark   (just the sort strategies)
+    //   ./gradlew jmh -Pbench=wikiSort                (just the WikiSort method, across shapes)
+    if (project.hasProperty("bench")) {
+        includes.set(listOf(project.property("bench").toString()))
+    }
+}
+
+// Analytical report (not a wall-clock benchmark): prints the metered move/comparison growth curve for
+// merge / merge.inplace / merge.wiki, normalised to n*log2(n). Shows merge.wiki's O(n log n) moves
+// versus merge.inplace's O(n log^2 n). Run: ./gradlew moveCurve
+tasks.register<JavaExec>("moveCurve") {
+    group = "verification"
+    description = "Print the move/comparison growth curve for merge / merge.inplace / merge.wiki."
+    mainClass.set("io.github.richeyworks.superbeefsort.demo.MoveCurveReport")
+    classpath = sourceSets["main"].runtimeClasspath
+    jvmArgs("-Xmx2g")
 }

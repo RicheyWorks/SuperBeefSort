@@ -6,11 +6,13 @@ import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.CountingSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.HeapSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.InPlaceMergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.QuickSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Level;
@@ -87,6 +89,8 @@ public class SortStrategyBenchmark {
     @Benchmark public Integer introSort()    { return sortWith(new IntroSortStrategy<>(), false); }
     @Benchmark public Integer quickSort()     { return sortWith(new QuickSortStrategy<>(), false); }
     @Benchmark public Integer mergeSort()     { return sortWith(new MergeSortStrategy<>(), false); }
+    @Benchmark public Integer inPlaceMergeSort() { return sortWith(new InPlaceMergeSortStrategy<>(), false); }
+    @Benchmark public Integer wikiSort()      { return sortWith(new WikiSortStrategy<>(), false); }
     @Benchmark public Integer heapSort()      { return sortWith(new HeapSortStrategy<>(), false); }
     @Benchmark public Integer jdkSort()       { return sortWith(new JdkSortStrategy<>(), false); }
     @Benchmark public Integer countingSort()  { return sortWith(new CountingSortStrategy<>(), true); }

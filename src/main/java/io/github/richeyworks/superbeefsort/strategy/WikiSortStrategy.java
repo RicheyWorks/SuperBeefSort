@@ -33,12 +33,17 @@ import io.github.richeyworks.superbeefsort.core.StrategyId;
  * merges. A final insertion sort tidies the buffer in place — no re-merge into the body is needed,
  * because the buffer holds the largest values and is already where it belongs.</p>
  *
- * <p><b>Stability.</b> The fast path runs only when {@link #fullyDistinct} confirms the merged region
- * has no repeated value, so there are never equal keys for block selection to mis-order; every input
- * with duplicates is routed to the stable rotation merge instead. Local merges still break ties toward
- * the left (A) run. The output matches a stable reference sort on every input. Empirically the move
- * count grows like O(n&nbsp;log&nbsp;n) (versus {@code merge.inplace}'s O(n&nbsp;log&sup2;&nbsp;n)),
- * at the cost of a larger comparison constant — the usual block-merge trade.</p>
+ * <p><b>Stability.</b> The fast path runs only when the merged region is confirmed to have no repeated
+ * value, so there are never equal keys for block selection to mis-order; every input with duplicates is
+ * routed to the stable rotation merge instead. That confirmation is threaded, not recomputed from
+ * scratch each merge: a monotone {@code trustDistinct} flag (seeded by an internal-duplicate scan of the
+ * base runs) means that while it holds, every run so far is strictly increasing, so a merge need only
+ * scan for a <em>cross-run</em> equal ({@link #crossRunEqual}, one comparison per element) — exactly what
+ * {@link #fullyDistinct} would conclude, at half the comparisons. The first duplicate seen anywhere
+ * clears the flag, after which the self-contained {@link #fullyDistinct} gate is used. Local merges still
+ * break ties toward the left (A) run. The output matches a stable reference sort on every input.
+ * Empirically the move count grows like O(n&nbsp;log&nbsp;n) (versus {@code merge.inplace}'s
+ * O(n&nbsp;log&sup2;&nbsp;n)), at the cost of a larger comparison constant — the usual block-merge trade.</p>
  */
 public final class WikiSortStrategy<K> implements SortStrategy<K> {
 
@@ -51,9 +56,21 @@ public final class WikiSortStrategy<K> implements SortStrategy<K> {
         if (n <= 1) {
             return;
         }
-        // 1. insertion-sort initial runs
+        // The all-distinct gate is the dominant comparison cost. Rather than re-derive distinctness from
+        // scratch at every merge, thread one monotone "trust" flag: while it holds, every run produced so
+        // far is strictly increasing, so a merge only has to scan for a *cross-run* equal (one comparison
+        // per element) instead of re-checking within-run order as well. The first duplicate seen anywhere
+        // drops the flag for good, after which merges fall back to the exact, self-contained fullyDistinct
+        // gate — so the block-vs-rotation choice (hence the output) is identical to a per-merge gate on
+        // every input; only the comparison count falls (≈2 n log n → ≈1 n log n on all-distinct data).
+        boolean trustDistinct = true;
+        // 1. insertion-sort initial runs; seed the flag by checking each run for an internal duplicate.
         for (int lo = 0; lo < n; lo += CUTOFF) {
-            insertion(b, lo, Math.min(lo + CUTOFF, n));
+            int hi = Math.min(lo + CUTOFF, n);
+            insertion(b, lo, hi);
+            if (trustDistinct && hasAdjacentEqual(b, lo, hi)) {
+                trustDistinct = false;
+            }
         }
         // 2. bottom-up doubling merges (long arithmetic keeps width<<1 from overflowing int)
         for (long width = CUTOFF; width < n; width <<= 1) {
@@ -62,7 +79,7 @@ public final class WikiSortStrategy<K> implements SortStrategy<K> {
                 int mid = (int) Math.min(lo + width, n);
                 int hi = (int) Math.min(lo + (width << 1), n);
                 if (mid < hi) {
-                    merge(b, l, mid, hi);
+                    trustDistinct = merge(b, l, mid, hi, trustDistinct);
                 }
             }
         }
@@ -70,23 +87,44 @@ public final class WikiSortStrategy<K> implements SortStrategy<K> {
 
     // ---- merge dispatch ----
 
-    /** Stable merge of sorted {@code [lo,mid)} and {@code [mid,hi)} in O(1) extra space. */
-    private void merge(SortBuffer<K> b, int lo, int mid, int hi) {
+    /**
+     * Stable merge of sorted {@code [lo,mid)} and {@code [mid,hi)} in O(1) extra space. Takes the running
+     * {@code trustDistinct} flag and returns it (possibly cleared): while trusted, both runs are known to
+     * be strictly increasing, so distinctness is decided by the cheaper {@link #crossRunEqual} scan;
+     * otherwise the self-contained {@link #fullyDistinct} gate decides it.
+     */
+    private boolean merge(SortBuffer<K> b, int lo, int mid, int hi, boolean trustDistinct) {
         if (lo >= mid || mid >= hi) {
-            return;
+            return trustDistinct;
         }
-        if (b.compare(mid - 1, mid) <= 0) {
-            return; // already ordered across the seam (and stable)
+        int seam = b.compare(mid - 1, mid);
+        if (seam <= 0) {
+            // Already ordered across the seam (no merge needed, and stable). A seam *equal* is itself a
+            // cross-run duplicate, so the merged run is no longer strictly increasing -> drop trust.
+            return seam < 0 ? trustDistinct : false;
         }
         int total = hi - lo;
         int blockSize = (int) Math.sqrt(total);
+        // Decide distinctness of the combined region. When trusted, both inputs are strictly increasing, so
+        // the region is all-distinct iff the two runs share no value -> a single cross-run scan suffices;
+        // this matches what fullyDistinct would conclude, at half the comparisons.
+        boolean distinct;
+        if (trustDistinct) {
+            distinct = !crossRunEqual(b, lo, mid, hi);
+            if (!distinct) {
+                trustDistinct = false; // a duplicate exists somewhere; stop trusting for the rest of the sort
+            }
+        } else {
+            distinct = fullyDistinct(b, lo, mid, hi);
+        }
         // The block-merge fast path needs at least two full blocks and an all-distinct region (so block
         // selection has no ties to mis-order). Everything else uses the always-correct rotation merge.
-        if (blockSize < 2 || total < 2 * blockSize || !fullyDistinct(b, lo, mid, hi)) {
+        if (distinct && blockSize >= 2 && total >= 2 * blockSize) {
+            blockMerge(b, lo, mid, hi, blockSize);
+        } else {
             rotationMerge(b, lo, mid, hi);
-            return;
         }
-        blockMerge(b, lo, mid, hi, blockSize);
+        return trustDistinct;
     }
 
     // ---- WikiSort block merge (region is all-distinct -> block heads are distinct) ----
@@ -240,9 +278,45 @@ public final class WikiSortStrategy<K> implements SortStrategy<K> {
     }
 
     /**
+     * True iff the sorted runs {@code [lo,mid)} and {@code [mid,hi)} share a value — assuming each run is
+     * already strictly increasing (the threaded {@code trustDistinct} invariant). A standard linear
+     * sorted-intersection walk: one comparison per element, versus {@link #fullyDistinct}'s two (it also
+     * re-verifies within-run strictness, which the trust flag lets us skip). Given strictly-increasing
+     * inputs, "no shared value" is exactly "merged region strictly increasing", so this and
+     * {@link #fullyDistinct} always agree — the block-vs-rotation decision is unchanged.
+     */
+    private boolean crossRunEqual(SortBuffer<K> b, int lo, int mid, int hi) {
+        int i = lo;
+        int j = mid;
+        while (i < mid && j < hi) {
+            int c = b.compare(i, j);
+            if (c == 0) {
+                return true;
+            }
+            if (c < 0) {
+                i++;
+            } else {
+                j++;
+            }
+        }
+        return false;
+    }
+
+    /** True iff the freshly insertion-sorted run {@code [lo,hi)} holds two adjacent equal values. */
+    private boolean hasAdjacentEqual(SortBuffer<K> b, int lo, int hi) {
+        for (int i = lo + 1; i < hi; i++) {
+            if (b.compare(i - 1, i) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * True iff merging the sorted runs {@code [lo,mid)} and {@code [mid,hi)} yields a strictly increasing
      * sequence — i.e. every value in the whole region is distinct (no within-run or cross-run duplicate).
-     * The block-merge path is only stable when this holds.
+     * The block-merge path is only stable when this holds. Self-contained (re-checks within-run order), so
+     * it is the gate used once the threaded {@code trustDistinct} flag has been cleared.
      */
     private boolean fullyDistinct(SortBuffer<K> b, int lo, int mid, int hi) {
         int i = lo;

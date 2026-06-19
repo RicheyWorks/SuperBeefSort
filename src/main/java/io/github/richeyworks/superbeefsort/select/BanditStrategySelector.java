@@ -37,7 +37,9 @@ import java.util.function.ToDoubleFunction;
  *       always; {@code insertion} only on small inputs (never explore O(n^2) on a big array);
  *       {@code counting}/{@code radix.lsd} only when faithful integer key stats are present (and
  *       counting only when the range is bounded). Mirrors the engine's own gating so a chosen arm
- *       always runs; no wasted pulls on fallbacks.</li>
+ *       always runs; no wasted pulls on fallbacks. An optional auxiliary-memory budget further drops
+ *       arms whose declared aux space exceeds it, so a memory-constrained selector explores only
+ *       in-place sorts.</li>
  *   <li><b>Priors from the cost model.</b> Each arm starts at the analytical estimate
  *       ({@code n log n} / run-aware TimSort / {@code n+range} counting / fixed-pass radix), so the
  *       bandit's <em>first</em> guess equals the cost-model choice and it never has to physically try
@@ -62,11 +64,20 @@ public final class BanditStrategySelector implements LearningStrategySelector {
     private final double explore;
     private final ToDoubleFunction<SortResult> cost;
     private final StrategySelector base;
+    private final long auxBudgetBytes;
     private final Map<String, Map<String, Arm>> table = new ConcurrentHashMap<>();
 
-    /** Defaults: exploration weight 0.7, cost = comparisons + moves, base = rule-based selector. */
+    /** Defaults: exploration weight 0.7, cost = comparisons + moves, base = rule-based selector, no budget. */
     public BanditStrategySelector() {
         this(0.7, new RuleBasedStrategySelector(), r -> (double) (r.comparisons() + r.moves()));
+    }
+
+    /**
+     * Defaults (exploration 0.7, cost = comparisons + moves, rule-based base) plus a SMART auxiliary-memory
+     * budget: arms whose declared aux memory exceeds {@code auxBudgetBytes} are not explored.
+     */
+    public BanditStrategySelector(long auxBudgetBytes) {
+        this(0.7, new RuleBasedStrategySelector(), r -> (double) (r.comparisons() + r.moves()), auxBudgetBytes);
     }
 
     /**
@@ -76,9 +87,27 @@ public final class BanditStrategySelector implements LearningStrategySelector {
      *                {@code SortResult::elapsedNanos} to tune on this machine's wall-clock timings)
      */
     public BanditStrategySelector(double explore, StrategySelector base, ToDoubleFunction<SortResult> cost) {
+        this(explore, base, cost, Long.MAX_VALUE);
+    }
+
+    /**
+     * @param explore        exploration weight (higher = explores longer; 0 = pure greedy on means)
+     * @param base           selector used for non-SMART policies, which are deterministic
+     * @param cost           maps a run's metrics to a scalar cost to minimize
+     * @param auxBudgetBytes max auxiliary memory (bytes) a SMART arm may use; arms whose declared
+     *                       {@code StrategyCapabilities.AuxMemory.estimatedBytes(n)} exceeds it are dropped,
+     *                       so the bandit explores only in-place sorts under memory pressure. Use
+     *                       {@link Long#MAX_VALUE} for unlimited (the default, original behaviour).
+     */
+    public BanditStrategySelector(double explore, StrategySelector base, ToDoubleFunction<SortResult> cost,
+                                  long auxBudgetBytes) {
+        if (auxBudgetBytes <= 0) {
+            throw new IllegalArgumentException("auxBudgetBytes must be positive: " + auxBudgetBytes);
+        }
         this.explore = explore;
         this.base = base;
         this.cost = cost;
+        this.auxBudgetBytes = auxBudgetBytes;
     }
 
     @Override
@@ -174,7 +203,7 @@ public final class BanditStrategySelector implements LearningStrategySelector {
         return size + "|" + sort + "|" + keys + "|" + p.distribution() + "|" + inv;
     }
 
-    private static Set<StrategyId> candidateArms(DataProfile p, StrategyRegistry registry) {
+    private Set<StrategyId> candidateArms(DataProfile p, StrategyRegistry registry) {
         LinkedHashSet<StrategyId> arms = new LinkedHashSet<>();
         arms.add(IntroSortStrategy.ID);
         arms.add(QuickSortStrategy.ID);
@@ -197,6 +226,13 @@ public final class BanditStrategySelector implements LearningStrategySelector {
             }
         }
         arms.removeIf(id -> !registry.contains(id));
+        // Memory-budget gate (SMART-only): drop any arm whose declared auxiliary memory exceeds the budget,
+        // so a memory-constrained selector explores only in-place sorts (heap/insertion CONSTANT, intro/quick
+        // LOGARITHMIC survive; LINEAR merge/TimSort/counting/radix/learned drop out). Unlimited = no-op.
+        if (auxBudgetBytes != Long.MAX_VALUE) {
+            int n = p.size();
+            arms.removeIf(id -> registry.get(id).capabilities().auxMemory().estimatedBytes(n) > auxBudgetBytes);
+        }
         if (arms.isEmpty()) {
             arms.add(IntroSortStrategy.ID);
         }

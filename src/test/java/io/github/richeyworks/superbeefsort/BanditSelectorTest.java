@@ -15,6 +15,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -129,5 +130,50 @@ class BanditSelectorTest {
         BanditStrategySelector bandit = new BanditStrategySelector();
         DataProfile big = profile(3_000_000, 0.5, null);
         assertEquals("merge.wiki", bandit.select(big, SelectionPolicy.STABLE, registry).strategy().value());
+    }
+
+    // ---- SMART policy: optional auxiliary-memory budget drops over-budget arms ----
+
+    @Test
+    void memoryBudgetExcludesLinearAuxComparisonArms() {
+        // 256 KB cap: at n=50k a LINEAR-aux sort needs 8n = 400 KB, so TimSort/merge are not even arms;
+        // the bandit explores only the in-place comparison sorts (intro / quick / heap).
+        BanditStrategySelector bandit = new BanditStrategySelector(1L << 18);
+        DataProfile p = profile(50_000, 0.5, null);
+        for (int i = 0; i < 200; i++) {
+            StrategyId id = bandit.select(p, SelectionPolicy.SMART, registry).strategy();
+            assertNotEquals("jdk.timsort", id.value(), "LINEAR-aux TimSort must be excluded under the budget");
+            assertNotEquals("merge", id.value(), "LINEAR-aux merge must be excluded under the budget");
+            bandit.observe(p, id, outcome(id, p.size(), 100_000.0)); // even made cheap, they can't be chosen
+        }
+    }
+
+    @Test
+    void memoryBudgetExcludesLinearIntegerArms() {
+        // Same cap with bounded-integer keys: counting / radix / learned are all LINEAR and drop out,
+        // despite normally being the cheapest arms for integer data.
+        BanditStrategySelector bandit = new BanditStrategySelector(1L << 18);
+        DataProfile p = profile(50_000, 0.5, new KeyStats(0, 40_000, true));
+        for (int i = 0; i < 200; i++) {
+            StrategyId id = bandit.select(p, SelectionPolicy.SMART, registry).strategy();
+            assertNotEquals("counting", id.value());
+            assertNotEquals("radix.lsd", id.value());
+            assertNotEquals("learned", id.value());
+            bandit.observe(p, id, outcome(id, p.size(), 100_000.0));
+        }
+    }
+
+    @Test
+    void unlimitedBudgetStillExploresLinearArms() {
+        // Contrast: the default (unlimited) bandit can still learn that a LINEAR-aux sort wins.
+        BanditStrategySelector bandit = new BanditStrategySelector();
+        DataProfile p = profile(50_000, 0.5, null);
+        train(bandit, registry, p, Map.of("jdk.timsort", 50_000.0), 900_000.0, 300);
+        assertEquals("jdk.timsort", bandit.select(p, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void nonPositiveBudgetIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> new BanditStrategySelector(0L));
     }
 }

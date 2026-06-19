@@ -74,4 +74,19 @@ class RuleBasedSelectorTest {
         // below the size threshold, plain merge sort's O(n) scratch is not worth avoiding
         assertEquals("merge", pickStable(profileDistinct(1_000, 1_000)));
     }
+
+    @Test
+    void exactlyAtMemoryBudgetBoundaryPicksWikiSort() {
+        // 2^21 distinct elements: merge's LINEAR scratch == the 16 MB budget, so the memory-budgeted
+        // gate engages WikiSort (reproduces the old `size >= 2^21` threshold byte-for-byte).
+        int n = 1 << 21;
+        assertEquals("merge.wiki", pickStable(profileDistinct(n, n)));
+    }
+
+    @Test
+    void justBelowMemoryBudgetBoundaryStaysMergeSort() {
+        // one element under 2^21: merge's scratch is below budget, so plain merge stays preferred.
+        int n = (1 << 21) - 1;
+        assertEquals("merge", pickStable(profileDistinct(n, n)));
+    }
 }

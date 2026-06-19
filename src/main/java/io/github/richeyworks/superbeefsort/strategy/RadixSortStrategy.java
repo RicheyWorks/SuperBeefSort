@@ -103,7 +103,8 @@ public final class RadixSortStrategy<K> implements SortStrategy<K> {
     @Override
     public StrategyCapabilities capabilities() {
         return StrategyCapabilities.builder()
-                .stable(true).inPlace(false).comparisonBased(false).requiresIntegerKeys(true).build();
+                .stable(true).inPlace(false).comparisonBased(false).requiresIntegerKeys(true)
+                .auxMemory(StrategyCapabilities.AuxMemory.LINEAR).build();   // O(n) bucket/output arrays
     }
 
     @Override

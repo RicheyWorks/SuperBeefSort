@@ -32,7 +32,8 @@ public final class JdkSortStrategy<K> implements SortStrategy<K> {
 
     @Override
     public StrategyCapabilities capabilities() {
-        return StrategyCapabilities.builder().stable(true).inPlace(false).adaptive(true).build();
+        return StrategyCapabilities.builder().stable(true).inPlace(false).adaptive(true)
+                .auxMemory(StrategyCapabilities.AuxMemory.LINEAR).build();   // TimSort merge buffer
     }
 
     @Override

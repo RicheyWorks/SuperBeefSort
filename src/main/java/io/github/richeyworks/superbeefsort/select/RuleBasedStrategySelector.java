@@ -1,5 +1,6 @@
 package io.github.richeyworks.superbeefsort.select;
 
+import io.github.richeyworks.superbeefsort.core.StrategyCapabilities;
 import io.github.richeyworks.superbeefsort.core.StrategyId;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
 import io.github.richeyworks.superbeefsort.profile.DataProfile;
@@ -27,10 +28,11 @@ public final class RuleBasedStrategySelector implements StrategySelector {
 
     private static final long COUNTING_RANGE_FLOOR = 1L << 16;
     // WikiSort is ~2-3x slower than plain merge in wall-clock at every size (a higher comparison
-    // constant), so it is only worth choosing when merge's O(n) scratch is genuinely prohibitive. At
-    // 2^21 elements that scratch is ~16 MB+ of references; below this, plain merge is faster and the
-    // memory saving is negligible. WikiSort here is purely the stable + O(1)-aux specialist for huge runs.
-    private static final int WIKI_MIN_SIZE = 1 << 21; // 2_097_152
+    // constant), so it is only worth choosing when merge's O(n) scratch is genuinely prohibitive. Express
+    // that as an explicit auxiliary-memory budget rather than a magic size: once merge's LINEAR aux (its
+    // declared StrategyCapabilities.AuxMemory) would exceed the budget, the stable O(1)-aux WikiSort wins.
+    // 16 MB of references == 2^21 (~2.1M) elements, reproducing the previous size threshold.
+    private static final long AUX_MEMORY_BUDGET_BYTES = 16L << 20; // 16 MB
 
     @Override
     public SortPlan select(DataProfile profile, SelectionPolicy policy, StrategyRegistry registry) {
@@ -50,9 +52,18 @@ public final class RuleBasedStrategySelector implements StrategySelector {
      * those stay on merge.
      */
     private SortPlan stable(DataProfile p, StrategyId fallback) {
-        if (p.size() >= WIKI_MIN_SIZE && p.distinctEstimate() >= (long) (0.9 * p.size())) {
+        // Plain merge dominates WikiSort on comparisons+moves, so the only reason to pay WikiSort's higher
+        // constant is to escape merge's O(n) scratch. Treat that as a memory budget: once merge's LINEAR
+        // auxiliary memory would exceed the budget, and the data is mostly distinct (else WikiSort just
+        // falls back to a rotation merge with no win), prefer the stable O(1)-aux WikiSort.
+        long mergeAuxBytes = StrategyCapabilities.AuxMemory.LINEAR.estimatedBytes(p.size());
+        boolean mostlyDistinct = p.distinctEstimate() >= (long) (0.9 * p.size());
+        // >= (not >): merge needing exactly the budget is already prohibitive, reproducing the old
+        // `size >= 2^21` threshold byte-for-byte (8 B * 2^21 == 16 MB).
+        if (mergeAuxBytes >= AUX_MEMORY_BUDGET_BYTES && mostlyDistinct) {
             return new SortPlan(WikiSortStrategy.ID, FeedMode.BULK, fallback,
-                    "large mostly-distinct stable (" + p.size() + " elems, ~" + p.distinctEstimate()
+                    "merge scratch ~" + (mergeAuxBytes >> 20) + "MB >= " + (AUX_MEMORY_BUDGET_BYTES >> 20)
+                            + "MB budget, mostly-distinct (" + p.size() + " elems, ~" + p.distinctEstimate()
                             + " distinct) -> WikiSort (stable, O(1) aux, O(n log n))");
         }
         return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");

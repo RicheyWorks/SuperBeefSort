@@ -1,5 +1,6 @@
 package io.github.richeyworks.superbeefsort.select;
 
+import io.github.richeyworks.superbeefsort.core.StrategyCapabilities;
 import io.github.richeyworks.superbeefsort.core.StrategyId;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
 import io.github.richeyworks.superbeefsort.profile.DataProfile;
@@ -39,7 +40,10 @@ public final class CostModelStrategySelector implements StrategySelector {
     private static final double RADIX_PASSES = 8.0;       // signed 64-bit keys -> ~8 byte passes
     private static final double LEARNED_PER_ITEM = 5.0;   // learned bucket sort: ~linear when buckets balance
     private static final double TIMSORT_OVERHEAD = 1.3;   // merge buffer allocations vs in-place sorts
-    private static final int WIKI_MIN_SIZE = 1 << 21;     // 2_097_152: only here does avoiding merge's ~16MB+ O(n) scratch beat its ~2-3x wall-clock edge
+    // Auxiliary-memory budget: above this, merge's O(n) reference scratch is prohibitive and the stable
+    // O(1)-aux WikiSort is preferred. 16 MB == 2^21 (~2.1M) elements, reproducing the old size threshold —
+    // now derived from the strategies' declared StrategyCapabilities.AuxMemory rather than a magic number.
+    private static final long AUX_MEMORY_BUDGET_BYTES = 16L << 20; // 16 MB
 
     @Override
     public SortPlan select(DataProfile p, SelectionPolicy policy, StrategyRegistry registry) {
@@ -128,9 +132,17 @@ public final class CostModelStrategySelector implements StrategySelector {
      * on both), so it is offered only where stability is the requirement.
      */
     private SortPlan stable(DataProfile p, StrategyId fallback) {
-        if (p.size() >= WIKI_MIN_SIZE && p.distinctEstimate() >= (long) (0.9 * p.size())) {
+        // Memory-budgeted crossover (mirrors RuleBasedStrategySelector): the cost model's comparisons+moves
+        // objective never picks WikiSort on its own (plain merge dominates both), so WikiSort is offered
+        // only when merge's LINEAR auxiliary memory exceeds the budget AND the data is mostly distinct.
+        long mergeAuxBytes = StrategyCapabilities.AuxMemory.LINEAR.estimatedBytes(p.size());
+        boolean mostlyDistinct = p.distinctEstimate() >= (long) (0.9 * p.size());
+        // >= (not >): merge needing exactly the budget is already prohibitive, reproducing the old
+        // `size >= 2^21` threshold byte-for-byte (8 B * 2^21 == 16 MB).
+        if (mergeAuxBytes >= AUX_MEMORY_BUDGET_BYTES && mostlyDistinct) {
             return new SortPlan(WikiSortStrategy.ID, FeedMode.BULK, fallback,
-                    "large mostly-distinct stable (" + p.size() + " elems) -> WikiSort (O(1) aux, O(n log n))");
+                    "merge scratch ~" + (mergeAuxBytes >> 20) + "MB >= " + (AUX_MEMORY_BUDGET_BYTES >> 20)
+                            + "MB budget, mostly-distinct (" + p.size() + " elems) -> WikiSort (O(1) aux, O(n log n))");
         }
         return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");
     }

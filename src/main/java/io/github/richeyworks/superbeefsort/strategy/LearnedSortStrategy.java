@@ -125,7 +125,8 @@ public final class LearnedSortStrategy<K> implements SortStrategy<K> {
     @Override
     public StrategyCapabilities capabilities() {
         return StrategyCapabilities.builder()
-                .stable(true).inPlace(false).comparisonBased(true).adaptive(true).requiresIntegerKeys(true).build();
+                .stable(true).inPlace(false).comparisonBased(true).adaptive(true).requiresIntegerKeys(true)
+                .auxMemory(StrategyCapabilities.AuxMemory.LINEAR).build();   // O(n) bucket arrays
     }
 
     @Override

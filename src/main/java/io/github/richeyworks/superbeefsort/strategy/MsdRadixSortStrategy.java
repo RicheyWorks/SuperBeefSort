@@ -141,7 +141,8 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
     public StrategyCapabilities capabilities() {
         return StrategyCapabilities.builder()
                 .stable(true).inPlace(false).comparisonBased(false)
-                .requiresByteSequenceEncoder(true).build();
+                .requiresByteSequenceEncoder(true)
+                .auxMemory(StrategyCapabilities.AuxMemory.LINEAR).build();   // O(n) bucket/output arrays
     }
 
     @Override

@@ -61,7 +61,8 @@ public final class MergeSortStrategy<K> implements SortStrategy<K> {
 
     @Override
     public StrategyCapabilities capabilities() {
-        return StrategyCapabilities.builder().stable(true).inPlace(false).build();
+        return StrategyCapabilities.builder().stable(true).inPlace(false)
+                .auxMemory(StrategyCapabilities.AuxMemory.LINEAR).build();   // O(n) merge scratch
     }
 
     @Override

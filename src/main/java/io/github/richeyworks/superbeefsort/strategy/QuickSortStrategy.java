@@ -67,7 +67,8 @@ public final class QuickSortStrategy<K> implements SortStrategy<K> {
 
     @Override
     public StrategyCapabilities capabilities() {
-        return StrategyCapabilities.builder().stable(false).inPlace(true).build();
+        return StrategyCapabilities.builder().stable(false).inPlace(true)
+                .auxMemory(StrategyCapabilities.AuxMemory.LOGARITHMIC).build();   // O(log n) recursion stack
     }
 
     @Override

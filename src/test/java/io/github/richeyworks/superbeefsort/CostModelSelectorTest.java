@@ -85,4 +85,18 @@ class CostModelSelectorTest {
     void smallStableStaysMergeSort() {
         assertEquals("merge", pickStable(profile(1_000, 0.5, null)));
     }
+
+    @Test
+    void exactlyAtMemoryBudgetBoundaryPicksWikiSort() {
+        // 2^21 elements (profile() makes them all-distinct): merge's LINEAR scratch == the 16 MB budget,
+        // so the memory-budgeted gate engages WikiSort (mirrors RuleBasedStrategySelector).
+        int n = 1 << 21;
+        assertEquals("merge.wiki", pickStable(profile(n, 0.5, null)));
+    }
+
+    @Test
+    void justBelowMemoryBudgetBoundaryStaysMergeSort() {
+        int n = (1 << 21) - 1;
+        assertEquals("merge", pickStable(profile(n, 0.5, null)));
+    }
 }

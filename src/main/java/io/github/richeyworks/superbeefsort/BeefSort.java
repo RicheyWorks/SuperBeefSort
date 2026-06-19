@@ -23,6 +23,7 @@ import io.github.richeyworks.superbeefsort.feed.FeedResult;
 import io.github.richeyworks.superbeefsort.feed.HealthPolicy;
 import io.github.richeyworks.superbeefsort.feed.ParallelFeeder;
 import io.github.richeyworks.superbeefsort.feed.StreamingFeeder;
+import io.github.richeyworks.superbeefsort.select.CostModelStrategySelector;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
 import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
@@ -63,6 +64,7 @@ public final class BeefSort<K> {
     private KeyEncoder<K> keyEncoder;             // null -> comparison sorts only
     private ByteSequenceEncoder<K> byteSequenceEncoder; // null -> no MSD radix auto-selection
     private StrategySelector selector; // null -> engine default (rule-based)
+    private OptionalLong maxAuxMemory = OptionalLong.empty(); // present -> cap SMART aux memory (via cost model)
     private OptionalLong randomSeed = OptionalLong.empty(); // present -> deterministic, reproducible runs
     private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for build*()
     private Supplier<? extends TreeStrategy<K>> targetStrategy; // null -> StrategyAdvisor decides
@@ -115,6 +117,23 @@ public final class BeefSort<K> {
     /** Override the strategy selector (e.g. a {@code CostModelStrategySelector}). */
     public BeefSort<K> selector(StrategySelector strategySelector) {
         this.selector = strategySelector;
+        return this;
+    }
+
+    /**
+     * Cap the auxiliary memory (in bytes) a {@link SelectionPolicy#SMART} selection may use: strategies whose
+     * estimated peak aux space exceeds {@code maxBytes} are not chosen, so selection degrades to in-place
+     * sorts under memory pressure. Convenience for {@code selector(new CostModelStrategySelector(maxBytes))} —
+     * it installs a budgeted cost-model selector, so it is mutually exclusive with an explicit
+     * {@link #selector(StrategySelector)} (to budget a different selector, e.g. the bandit, construct it with
+     * the budget and pass it to {@code selector} instead). Affects {@code SMART} only; {@code STABLE} keeps
+     * its own merge→WikiSort crossover.
+     */
+    public BeefSort<K> maxAuxMemory(long maxBytes) {
+        if (maxBytes <= 0) {
+            throw new IllegalArgumentException("maxAuxMemory must be positive: " + maxBytes);
+        }
+        this.maxAuxMemory = OptionalLong.of(maxBytes);
         return this;
     }
 
@@ -227,7 +246,7 @@ public final class BeefSort<K> {
         return AdaptiveStreamSorter.<K>builder(comparator)
                 .keyEncoder(keyEncoder)
                 .byteSequenceEncoder(byteSequenceEncoder)
-                .selector(selector)
+                .selector(resolveSelector())
                 .policy(policy)
                 .detector(detector)
                 .healthPolicy(healthPolicy)
@@ -263,9 +282,27 @@ public final class BeefSort<K> {
     }
 
     private BeefSortEngine<K> engine() {
-        return selector == null
+        StrategySelector sel = resolveSelector();
+        return sel == null
                 ? new BeefSortEngine<>(keyEncoder, byteSequenceEncoder)
-                : new BeefSortEngine<>(selector, keyEncoder, byteSequenceEncoder);
+                : new BeefSortEngine<>(sel, keyEncoder, byteSequenceEncoder);
+    }
+
+    /**
+     * The effective selector: a budgeted {@link CostModelStrategySelector} when {@link #maxAuxMemory} is set,
+     * otherwise the explicit {@link #selector} (possibly {@code null} → engine default). The two are mutually
+     * exclusive, since a budget installs its own selector.
+     */
+    private StrategySelector resolveSelector() {
+        if (maxAuxMemory.isPresent()) {
+            if (selector != null) {
+                throw new IllegalStateException(
+                        "maxAuxMemory(...) and selector(...) are mutually exclusive; "
+                                + "set the budget on your selector instead");
+            }
+            return new CostModelStrategySelector(maxAuxMemory.getAsLong());
+        }
+        return selector;
     }
 
     /** Linear de-dup of an already-ascending run under {@link #comparator}. */

@@ -11,6 +11,7 @@ import io.github.richeyworks.superbeefsort.select.SortPlan;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** The cost-model selector's choices across constructed profiles. */
 class CostModelSelectorTest {
@@ -98,5 +99,38 @@ class CostModelSelectorTest {
     void justBelowMemoryBudgetBoundaryStaysMergeSort() {
         int n = (1 << 21) - 1;
         assertEquals("merge", pickStable(profile(n, 0.5, null)));
+    }
+
+    // ---- SMART policy: configurable auxiliary-memory budget excludes over-budget candidates ----
+
+    @Test
+    void defaultSelectorHasNoMemoryBudgetAndPicksCounting() {
+        // Default ctor == unlimited budget: bounded-integer data still picks the LINEAR-aux counting sort.
+        int n = 200_000;
+        assertEquals("counting", pick(profile(n, 0.5, new KeyStats(0, 50_000, true))));
+    }
+
+    @Test
+    void tightMemoryBudgetExcludesLinearSortsAndFallsToIntrosort() {
+        // 1 MB cap: every LINEAR-aux sort needs 8n = 1.6 MB > 1 MB at n=200k, so all are excluded and the
+        // in-place introsort (negligible LOGARITHMIC stack) wins -- the memory-pressure degradation path.
+        CostModelStrategySelector budgeted = new CostModelStrategySelector(1L << 20);
+        int n = 200_000;
+        DataProfile p = profile(n, 0.5, new KeyStats(0, 50_000, true));
+        assertEquals("intro", budgeted.select(p, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void budgetEqualToCandidateAuxKeepsThatCandidate() {
+        // Budget == 8n (counting's exact LINEAR aux at n=200k): the check is inclusive (<=), so counting fits.
+        int n = 200_000;
+        CostModelStrategySelector budgeted = new CostModelStrategySelector(8L * n);
+        DataProfile p = profile(n, 0.5, new KeyStats(0, 50_000, true));
+        assertEquals("counting", budgeted.select(p, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void nonPositiveBudgetIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> new CostModelStrategySelector(0));
     }
 }

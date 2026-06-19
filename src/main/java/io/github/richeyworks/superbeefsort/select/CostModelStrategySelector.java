@@ -40,10 +40,35 @@ public final class CostModelStrategySelector implements StrategySelector {
     private static final double RADIX_PASSES = 8.0;       // signed 64-bit keys -> ~8 byte passes
     private static final double LEARNED_PER_ITEM = 5.0;   // learned bucket sort: ~linear when buckets balance
     private static final double TIMSORT_OVERHEAD = 1.3;   // merge buffer allocations vs in-place sorts
-    // Auxiliary-memory budget: above this, merge's O(n) reference scratch is prohibitive and the stable
+    // STABLE-policy crossover: above this, merge's O(n) reference scratch is prohibitive and the stable
     // O(1)-aux WikiSort is preferred. 16 MB == 2^21 (~2.1M) elements, reproducing the old size threshold —
-    // now derived from the strategies' declared StrategyCapabilities.AuxMemory rather than a magic number.
-    private static final long AUX_MEMORY_BUDGET_BYTES = 16L << 20; // 16 MB
+    // derived from the strategies' declared StrategyCapabilities.AuxMemory rather than a magic number.
+    // Distinct from smartAuxBudgetBytes below: this is a fixed merge->WikiSort crossover used only by STABLE.
+    private static final long STABLE_WIKI_CROSSOVER_BYTES = 16L << 20; // 16 MB
+
+    /**
+     * Optional auxiliary-memory cap applied under SMART: any candidate whose declared
+     * {@link StrategyCapabilities.AuxMemory#estimatedBytes(long)} exceeds this is excluded, so the selector
+     * degrades to in-place sorts (introsort / insertion) under memory pressure. {@link Long#MAX_VALUE} means
+     * unlimited — memory never excludes a candidate, which is the original behavior and the default.
+     */
+    private final long smartAuxBudgetBytes;
+
+    /** No auxiliary-memory budget: memory never excludes a SMART candidate (original behavior). */
+    public CostModelStrategySelector() {
+        this(Long.MAX_VALUE);
+    }
+
+    /**
+     * @param smartAuxBudgetBytes max auxiliary memory (bytes) a SMART candidate may use; strategies whose
+     *     estimated peak aux exceeds it are excluded. Use {@link Long#MAX_VALUE} for unlimited.
+     */
+    public CostModelStrategySelector(long smartAuxBudgetBytes) {
+        if (smartAuxBudgetBytes <= 0) {
+            throw new IllegalArgumentException("smartAuxBudgetBytes must be positive: " + smartAuxBudgetBytes);
+        }
+        this.smartAuxBudgetBytes = smartAuxBudgetBytes;
+    }
 
     @Override
     public SortPlan select(DataProfile p, SelectionPolicy policy, StrategyRegistry registry) {
@@ -68,7 +93,7 @@ public final class CostModelStrategySelector implements StrategySelector {
 
         long runs = Math.max(1L, Math.round((1.0 - p.sortednessRatio()) * (n - 1)) + 1);
         double timsortCost = TIMSORT_OVERHEAD * n * (Math.log(runs) / LN2 + 1.0); // +1 guards runs == 1
-        if (timsortCost < bestCost) {
+        if (timsortCost < bestCost && withinSmartBudget(JdkSortStrategy.ID, n, registry)) {
             bestId = JdkSortStrategy.ID;
             bestCost = timsortCost;
             why = "few runs (~" + runs + ") -> TimSort";
@@ -78,7 +103,7 @@ public final class CostModelStrategySelector implements StrategySelector {
         // count is EXACT (small/DEEP inputs); an estimate is never used to pick an O(n^2)-risk strategy.
         if (p.inversionsExact() && p.inversions() >= 0) {
             double insertionCost = (double) n + p.inversions();
-            if (insertionCost < bestCost) {
+            if (insertionCost < bestCost && withinSmartBudget(InsertionSortStrategy.ID, n, registry)) {
                 bestId = InsertionSortStrategy.ID;
                 bestCost = insertionCost;
                 why = "n+inversions insertion (" + p.inversions() + " inv)";
@@ -87,7 +112,7 @@ public final class CostModelStrategySelector implements StrategySelector {
 
         if (p.hasByteSequenceKey()) {
             double msdCost = 8.0 * n; // ~8 byte passes, distribution-adaptive
-            if (msdCost < bestCost) {
+            if (msdCost < bestCost && withinSmartBudget(MsdRadixSortStrategy.ID, n, registry)) {
                 bestId = MsdRadixSortStrategy.ID;
                 bestCost = msdCost;
                 why = "byte-sequence keys -> MSD radix";
@@ -99,14 +124,14 @@ public final class CostModelStrategySelector implements StrategySelector {
             long span = ks.span();
             if (ks.countingFeasible() && span >= 0) {
                 double countingCost = (double) n + (span + 1);
-                if (countingCost < bestCost) {
+                if (countingCost < bestCost && withinSmartBudget(CountingSortStrategy.ID, n, registry)) {
                     bestId = CountingSortStrategy.ID;
                     bestCost = countingCost;
                     why = "n+range counting (range " + (span + 1) + ")";
                 }
             }
             double radixCost = RADIX_PASSES * n;
-            if (radixCost < bestCost) {
+            if (radixCost < bestCost && withinSmartBudget(RadixSortStrategy.ID, n, registry)) {
                 bestId = RadixSortStrategy.ID;
                 bestCost = radixCost;
                 why = "fixed-pass LSD radix";
@@ -114,14 +139,32 @@ public final class CostModelStrategySelector implements StrategySelector {
             // Learned (sample) sort: distribution-adaptive, near-linear, and unconstrained by key range —
             // so for wide-range integers it beats fixed-pass radix; bounded ranges still favour counting.
             double learnedCost = LEARNED_PER_ITEM * n;
-            if (learnedCost < bestCost) {
+            if (learnedCost < bestCost && withinSmartBudget(LearnedSortStrategy.ID, n, registry)) {
                 bestId = LearnedSortStrategy.ID;
                 bestCost = learnedCost;
                 why = "learned bucket sort (~" + (int) LEARNED_PER_ITEM + "n, distribution-adaptive)";
             }
         }
 
+        if (smartAuxBudgetBytes != Long.MAX_VALUE) {
+            why += " [aux<=" + (smartAuxBudgetBytes >> 20) + "MB]";
+        }
         return new SortPlan(bestId, FeedMode.BULK, fallback, "cost model -> " + why);
+    }
+
+    /**
+     * Whether a candidate's declared auxiliary memory fits the SMART budget. Short-circuits to {@code true}
+     * for the default unlimited budget (no registry lookup), so default selection stays allocation-free and
+     * behaviour-identical; unknown ids are never excluded on memory grounds.
+     */
+    private boolean withinSmartBudget(StrategyId id, int n, StrategyRegistry registry) {
+        if (smartAuxBudgetBytes == Long.MAX_VALUE) {
+            return true;
+        }
+        if (!registry.contains(id)) {
+            return true;
+        }
+        return registry.get(id).capabilities().auxMemory().estimatedBytes(n) <= smartAuxBudgetBytes;
     }
 
     /**
@@ -139,9 +182,9 @@ public final class CostModelStrategySelector implements StrategySelector {
         boolean mostlyDistinct = p.distinctEstimate() >= (long) (0.9 * p.size());
         // >= (not >): merge needing exactly the budget is already prohibitive, reproducing the old
         // `size >= 2^21` threshold byte-for-byte (8 B * 2^21 == 16 MB).
-        if (mergeAuxBytes >= AUX_MEMORY_BUDGET_BYTES && mostlyDistinct) {
+        if (mergeAuxBytes >= STABLE_WIKI_CROSSOVER_BYTES && mostlyDistinct) {
             return new SortPlan(WikiSortStrategy.ID, FeedMode.BULK, fallback,
-                    "merge scratch ~" + (mergeAuxBytes >> 20) + "MB >= " + (AUX_MEMORY_BUDGET_BYTES >> 20)
+                    "merge scratch ~" + (mergeAuxBytes >> 20) + "MB >= " + (STABLE_WIKI_CROSSOVER_BYTES >> 20)
                             + "MB budget, mostly-distinct (" + p.size() + " elems) -> WikiSort (O(1) aux, O(n log n))");
         }
         return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");

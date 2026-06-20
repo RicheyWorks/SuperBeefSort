@@ -4,6 +4,7 @@ import io.github.richeyworks.csrbt.control.MorphController;
 import io.github.richeyworks.csrbt.control.MorphPolicy;
 import io.github.richeyworks.csrbt.control.StrategyId;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
+import io.github.richeyworks.superbeefsort.csrbt.AdaptationReport;
 import io.github.richeyworks.superbeefsort.csrbt.WorkloadAdaptation;
 import org.junit.jupiter.api.Test;
 
@@ -118,5 +119,30 @@ class WorkloadAdaptationTest {
                         .source(sample())
                         .accessPattern(AccessPolicy.WRITE_HEAVY)
                         .buildAdaptive(MorphPolicy.defaults()));
+    }
+
+    @Test
+    void bornRightHoldsWithZeroMorphsOnMatchingWorkload() {
+        // The §5 success metric, now an assertable guardrail: READ_HEAVY advises AVL, and under uniform
+        // read pressure AVL is already cheapest (see uniformReadPressureMorphsRedBlackToAvl), so a tree
+        // BORN AVL never has to morph on a matching workload — adaptationReport().held() captures that.
+        WorkloadAdaptation<Integer> adapt = BeefSort.with(Comparator.<Integer>naturalOrder())
+                .source(sample())
+                .accessPattern(AccessPolicy.READ_HEAVY) // born AVL
+                .buildAdaptive(relaxed());
+        assertEquals(StrategyId.AVL, adapt.currentStrategy(), "READ_HEAVY is born AVL");
+
+        for (int pass = 0; pass < 3; pass++) {
+            for (int k = 0; k < 2000; k++) {
+                adapt.recordSearch(k); // uniform reads keep AVL cheapest -> no morph
+            }
+            adapt.maybeAdapt();
+        }
+
+        AdaptationReport report = adapt.adaptationReport();
+        assertTrue(report.held(), "a born-right tree must hold on a matching workload: " + report.summary());
+        assertEquals(0, report.morphs());
+        assertEquals(3, report.evaluations());
+        assertEquals(StrategyId.AVL, adapt.currentStrategy(), "still AVL after the matching workload");
     }
 }

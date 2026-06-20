@@ -47,6 +47,8 @@ public final class WorkloadAdaptation<K> {
     private final WorkloadMonitor monitor;
     private final MorphController<K> controller;
     private int opsSinceEval;
+    private int evaluations;
+    private int morphs;
 
     private WorkloadAdaptation(OrderedSet<K> set, WorkloadMonitor monitor, StrategyScorer scorer,
                                MorphPolicy policy) {
@@ -127,7 +129,22 @@ public final class WorkloadAdaptation<K> {
     public MorphController.MorphResult maybeAdapt() {
         int elapsed = opsSinceEval;
         opsSinceEval = 0;
-        return controller.evaluateAndMaybeMorph(currentStrategy(), elapsed);
+        MorphController.MorphResult result = controller.evaluateAndMaybeMorph(currentStrategy(), elapsed);
+        evaluations++;
+        if (result.morphed()) {
+            morphs++;
+        }
+        return result;
+    }
+
+    /**
+     * A running {@link AdaptationReport} of post-feed control-plane activity: how many {@link #maybeAdapt()}
+     * cycles have run, how many morphed the tree, and the strategy currently held. A {@code held()} report
+     * (zero morphs) on a workload matching the declared access pattern is the §5 "born right" success
+     * metric — the tree was shaped correctly at construction, so CSRBT never had to morph it.
+     */
+    public AdaptationReport adaptationReport() {
+        return new AdaptationReport(evaluations, morphs, currentStrategy());
     }
 
     private static <K> StrategyId strategyIdOf(TreeStrategy<K> strategy) {

@@ -231,7 +231,10 @@ public final class BeefSort<K> {
      * Sort, build a born-optimal {@link OrderedSet} in the morph-family strategy the data profile favors,
      * then wire it to CSRBT's control plane with a {@link ProfileGuidedScorer} prior toward that strategy —
      * "co-optimization": the sort's profile both shapes the tree at birth and primes its adaptation, which
-     * then defers to the live workload (docs/architecture-csrbt-integration.md §5). Unlike
+     * then defers to the live workload (docs/architecture-csrbt-integration.md §5). The prior's
+     * <em>strength</em> is {@linkplain ProfileGuidedScorer#derivePrior derived from the realized run}
+     * (Gap&nbsp;5): a clean, cheap, exactly-measured sort nudges harder toward the favored strategy, an
+     * expensive or only-sampled one more softly. Unlike
      * {@link #buildAdaptive(MorphPolicy)} this always uses a morph-managed strategy (so WRITE_HEAVY maps to
      * Red-Black here, not the static weight-balanced shape), guaranteeing the tree can adapt.
      */
@@ -241,7 +244,7 @@ public final class BeefSort<K> {
         var favored = ProfileGuidedScorer.favoredStrategy(run.profile(), accessPolicy);
         TreeStrategy<K> born = (targetStrategy != null) ? targetStrategy.get() : favored.<K>newStrategy();
         OrderedSet<K> set = OrderedSet.fromSorted(distinct, born, comparator);
-        return WorkloadAdaptation.attachProfileGuided(set, run.profile(), accessPolicy, policy);
+        return WorkloadAdaptation.attachProfileGuided(set, run.profile(), accessPolicy, run.sortMetrics(), policy);
     }
 
     /**

@@ -13,6 +13,7 @@ import io.github.richeyworks.csrbt.strategy.HybridStrategy;
 import io.github.richeyworks.csrbt.strategy.RedBlackStrategy;
 import io.github.richeyworks.csrbt.strategy.SplayStrategy;
 import io.github.richeyworks.csrbt.strategy.TreeStrategy;
+import io.github.richeyworks.superbeefsort.core.SortResult;
 import io.github.richeyworks.superbeefsort.profile.DataProfile;
 
 import java.util.Objects;
@@ -81,6 +82,20 @@ public final class WorkloadAdaptation<K> {
     public static <K> WorkloadAdaptation<K> attachProfileGuided(OrderedSet<K> set, DataProfile profile,
                                                                 AccessPolicy access, MorphPolicy policy) {
         return attach(set, new RollingWorkloadMonitor(), ProfileGuidedScorer.forProfile(profile, access), policy);
+    }
+
+    /**
+     * As {@link #attachProfileGuided(OrderedSet, DataProfile, AccessPolicy, MorphPolicy)} but with the prior
+     * <em>strength</em> {@linkplain ProfileGuidedScorer#derivePrior derived from the realized sort run}
+     * ({@code metrics}) rather than fixed at {@link ProfileGuidedScorer#DEFAULT_PRIOR} — the Gap&nbsp;5
+     * handoff: a clean, cheap, exactly-measured run nudges the tree harder toward the favored strategy, an
+     * expensive/uncertain run more softly. A {@code null} {@code metrics} reproduces the fixed-prior overload.
+     */
+    public static <K> WorkloadAdaptation<K> attachProfileGuided(OrderedSet<K> set, DataProfile profile,
+                                                                AccessPolicy access, SortResult metrics,
+                                                                MorphPolicy policy) {
+        return attach(set, new RollingWorkloadMonitor(),
+                ProfileGuidedScorer.forRun(profile, access, metrics), policy);
     }
 
     /** The live set: reads/writes flow through this instance, which is the one morphed in place. */

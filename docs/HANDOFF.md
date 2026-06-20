@@ -319,8 +319,10 @@ flags) — **4/4 green**, full run **42/42** on the bootstrapped JDK 17.
   `SHALLOW` inputs the inversion count is a strided-sample **estimate** — empirically within ~0.013 of
   the exact ratio over 50 random seeds at n=60k, but systematic sampling can in principle alias with a
   periodic input, so insertion routing deliberately trusts only the **exact** count (small/`DEEP`).
-  Folding the inversion estimate into the TimSort run-count model (rather than just insertion) is still
-  open.
+  Folding the inversion estimate into the TimSort run-count model (rather than just insertion) is now
+  done — the cost model discounts TimSort's merge levels by a galloping factor keyed on
+  `min(sortedness, 1 - inversionRatio)` (both signals must agree the data is ordered); see
+  `docs/adr-timsort-inversion-galloping.md`.
 - External / out-of-core sort not implemented. (Parallel mirror feed, bounded streaming, and
   concept-drift-adaptive streaming now are — see the streaming + drift sections above.)
 
@@ -343,9 +345,10 @@ All three IDEAS "top picks" are now done (O(n) bulk-build, self-tuning selector,
 Quick wins if picking up cold: push host-side first (SBS **and** the sibling CSRBT changes, or CI stays
 red), then pick a roadmap phase — Phase 3's ensemble range-sharded parallel feed is the next natural
 CSRBT-native win; Phase 2's Rust kernel is the heaviest lift. (The true inversion-count signal and the
-visualizer's record-and-replay captures are both now done — see above.) Smaller remaining: fold the
-inversion estimate into the TimSort run-count model, or a true inversion-count signal in the JS profiler
-to mirror the Java one in the visualizer.
+visualizer's record-and-replay captures are both now done — see above.) Smaller remaining: a true
+inversion-count signal in the JS profiler to mirror the Java one in the visualizer. (Folding the inversion
+estimate into the TimSort run-count model is now done — see the galloping-discount note above and
+`docs/adr-timsort-inversion-galloping.md`.)
 
 ## Repo / push status
 

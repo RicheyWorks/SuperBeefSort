@@ -40,6 +40,10 @@ public final class CostModelStrategySelector implements StrategySelector {
     private static final double RADIX_PASSES = 8.0;       // signed 64-bit keys -> ~8 byte passes
     private static final double LEARNED_PER_ITEM = 5.0;   // learned bucket sort: ~linear when buckets balance
     private static final double TIMSORT_OVERHEAD = 1.3;   // merge buffer allocations vs in-place sorts
+    // Max fraction of TimSort's merge levels that galloping saves on globally-ordered data (where the
+    // adjacency run-count and the global inversion signal *both* indicate order). Calibrated to reward
+    // genuine near-sortedness while preserving the random -> introsort boundary; see the TimSort cost below.
+    private static final double GALLOP_DISCOUNT = 0.4;
     // STABLE-policy crossover: above this, merge's O(n) reference scratch is prohibitive and the stable
     // O(1)-aux WikiSort is preferred. 16 MB == 2^21 (~2.1M) elements, reproducing the old size threshold —
     // derived from the strategies' declared StrategyCapabilities.AuxMemory rather than a magic number.
@@ -128,12 +132,25 @@ public final class CostModelStrategySelector implements StrategySelector {
         String why = "n log n introsort";
 
         long runs = Math.max(1L, Math.round((1.0 - p.sortednessRatio()) * (n - 1)) + 1);
+        // Galloping-aware merge cost. The run count comes from adjacency — the right driver for TimSort, since
+        // a rotation or a far-apart swap is only a couple of runs and genuinely cheap, which the global
+        // inversion count would wrongly inflate. But TimSort's merges *gallop* (collapsing toward O(n)) only
+        // when the data is ordered GLOBALLY, not merely locally; so the global inversion signal is folded in
+        // here as a discount on the merge levels, gated on BOTH signals agreeing the data is ordered:
+        // globalOrder = min(adjacency sortedness, 1 - inversionRatio). When adjacency looks tidy but the
+        // inversion count reveals hidden disorder (high inversionRatio), the discount is suppressed and TimSort
+        // is not over-credited; when no inversion count was measured, inversionRatio falls back to
+        // (1 - sortedness) so min() is a no-op and the estimate is the original adjacency-only one. Safe against
+        // a noisy inversion sample: it can only *reduce* the discount (capped by the local sortedness), never
+        // inflate it, and TimSort is O(n log n) regardless.
+        double globalOrder = Math.min(p.sortednessRatio(), 1.0 - p.inversionRatio());
+        double mergeLevels = (Math.log(runs) / LN2) * (1.0 - GALLOP_DISCOUNT * globalOrder);
         double timsortCost = penalizedCost(JdkSortStrategy.ID,
-                TIMSORT_OVERHEAD * n * (Math.log(runs) / LN2 + 1.0), n, registry); // +1 guards runs == 1
+                TIMSORT_OVERHEAD * n * (mergeLevels + 1.0), n, registry); // +1 guards runs == 1
         if (timsortCost < bestCost && withinSmartBudget(JdkSortStrategy.ID, n, registry)) {
             bestId = JdkSortStrategy.ID;
             bestCost = timsortCost;
-            why = "few runs (~" + runs + ") -> TimSort";
+            why = "few runs (~" + runs + "), global-order " + String.format("%.2f", globalOrder) + " -> TimSort";
         }
 
         // Insertion sort's real cost is its adaptive O(n + inversions). Only trusted when the inversion

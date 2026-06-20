@@ -188,4 +188,37 @@ class CostModelSelectorTest {
         assertThrows(IllegalArgumentException.class, () -> CostModelStrategySelector.withAuxPenalty(Double.NaN));
         assertThrows(IllegalArgumentException.class, () -> new CostModelStrategySelector(1L << 20, -1.0));
     }
+
+    // ---- global inversion signal refines the TimSort run-cost (galloping) ----
+
+    /** A profile carrying an exact, measured global inversion count (other fields neutral). */
+    private static DataProfile profileInv(int n, double sortedness, long inversions) {
+        return new DataProfile(n, sortedness, false, ProfileDepth.DEEP, n, null, Distribution.UNKNOWN,
+                0, inversions, true);
+    }
+
+    @Test
+    void lowGlobalInversionsLetTimsortWinWhereAdjacencyAloneWouldNot() {
+        // At 0.70 adjacency sortedness the adjacency-only run cost exceeds introsort (so the old model picked
+        // introsort here), but a low *global* inversion count (10% of max) shows the data is genuinely ordered,
+        // so galloping discounts TimSort's merges and it wins.
+        int n = 50_000;
+        long maxInv = (long) n * (n - 1) / 2;
+        DataProfile globallyOrdered = profileInv(n, 0.70, (long) (0.10 * maxInv));
+        assertEquals("jdk.timsort",
+                selector.select(globallyOrdered, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void highGlobalInversionsKeepIntrosortAtTheSameAdjacency() {
+        // Same 0.70 adjacency sortedness, but a high global inversion count (70% of max) reveals the data is
+        // globally disordered (locally tidy, far-apart swaps): the galloping discount is suppressed, so TimSort
+        // stays costlier than introsort. The inversion signal distinguishes two inputs the adjacency-only model
+        // scored identically.
+        int n = 50_000;
+        long maxInv = (long) n * (n - 1) / 2;
+        DataProfile globallyDisordered = profileInv(n, 0.70, (long) (0.70 * maxInv));
+        assertEquals("intro",
+                selector.select(globallyDisordered, SelectionPolicy.SMART, registry).strategy().value());
+    }
 }

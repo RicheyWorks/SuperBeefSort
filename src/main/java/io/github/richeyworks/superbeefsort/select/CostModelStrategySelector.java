@@ -54,9 +54,21 @@ public final class CostModelStrategySelector implements StrategySelector {
      */
     private final long smartAuxBudgetBytes;
 
-    /** No auxiliary-memory budget: memory never excludes a SMART candidate (original behavior). */
+    /**
+     * Optional <em>graded</em> auxiliary-memory penalty for the SMART objective: each candidate's estimated
+     * cost is raised by {@code auxByteWeight ×} its declared
+     * {@link StrategyCapabilities.AuxMemory#estimatedBytes(long)}, so memory-hungry sorts are discouraged in
+     * proportion to their footprint rather than hard-excluded. {@code 0.0} (the default) adds nothing, so the
+     * objective is byte-for-byte the original comparisons+moves estimate. This is the deterministic,
+     * cost-model analog of {@link BanditStrategySelector#costWithMemory(double)} (which tunes on
+     * <em>measured</em> aux) and a softer alternative to the {@link #smartAuxBudgetBytes} hard cap — the two
+     * compose: a candidate is excluded if it exceeds the budget and otherwise penalized by its bytes.
+     */
+    private final double auxByteWeight;
+
+    /** No budget and no penalty: memory never affects a SMART candidate (original behavior). */
     public CostModelStrategySelector() {
-        this(Long.MAX_VALUE);
+        this(Long.MAX_VALUE, 0.0);
     }
 
     /**
@@ -64,10 +76,34 @@ public final class CostModelStrategySelector implements StrategySelector {
      *     estimated peak aux exceeds it are excluded. Use {@link Long#MAX_VALUE} for unlimited.
      */
     public CostModelStrategySelector(long smartAuxBudgetBytes) {
+        this(smartAuxBudgetBytes, 0.0);
+    }
+
+    /**
+     * @param smartAuxBudgetBytes hard cap (bytes) on a SMART candidate's estimated aux; over-budget
+     *     candidates are excluded. {@link Long#MAX_VALUE} for unlimited.
+     * @param auxByteWeight graded penalty added to each SMART candidate's cost per estimated auxiliary byte
+     *     ({@code >= 0}; {@code 0} disables it). The budget and the penalty compose.
+     */
+    public CostModelStrategySelector(long smartAuxBudgetBytes, double auxByteWeight) {
         if (smartAuxBudgetBytes <= 0) {
             throw new IllegalArgumentException("smartAuxBudgetBytes must be positive: " + smartAuxBudgetBytes);
         }
+        if (!(auxByteWeight >= 0.0)) { // also rejects NaN
+            throw new IllegalArgumentException("auxByteWeight must be >= 0: " + auxByteWeight);
+        }
         this.smartAuxBudgetBytes = smartAuxBudgetBytes;
+        this.auxByteWeight = auxByteWeight;
+    }
+
+    /**
+     * A selector with a graded SMART aux-memory penalty and no hard budget — the deterministic, single-knob
+     * way to make the cost model trade speed against memory (per estimated auxiliary byte) without the bandit.
+     *
+     * @param auxByteWeight cost added per estimated auxiliary byte ({@code >= 0})
+     */
+    public static CostModelStrategySelector withAuxPenalty(double auxByteWeight) {
+        return new CostModelStrategySelector(Long.MAX_VALUE, auxByteWeight);
     }
 
     @Override
@@ -88,11 +124,12 @@ public final class CostModelStrategySelector implements StrategySelector {
         double log2n = Math.log(n) / LN2;
 
         StrategyId bestId = IntroSortStrategy.ID;
-        double bestCost = n * log2n;
+        double bestCost = penalizedCost(IntroSortStrategy.ID, n * log2n, n, registry);
         String why = "n log n introsort";
 
         long runs = Math.max(1L, Math.round((1.0 - p.sortednessRatio()) * (n - 1)) + 1);
-        double timsortCost = TIMSORT_OVERHEAD * n * (Math.log(runs) / LN2 + 1.0); // +1 guards runs == 1
+        double timsortCost = penalizedCost(JdkSortStrategy.ID,
+                TIMSORT_OVERHEAD * n * (Math.log(runs) / LN2 + 1.0), n, registry); // +1 guards runs == 1
         if (timsortCost < bestCost && withinSmartBudget(JdkSortStrategy.ID, n, registry)) {
             bestId = JdkSortStrategy.ID;
             bestCost = timsortCost;
@@ -102,7 +139,7 @@ public final class CostModelStrategySelector implements StrategySelector {
         // Insertion sort's real cost is its adaptive O(n + inversions). Only trusted when the inversion
         // count is EXACT (small/DEEP inputs); an estimate is never used to pick an O(n^2)-risk strategy.
         if (p.inversionsExact() && p.inversions() >= 0) {
-            double insertionCost = (double) n + p.inversions();
+            double insertionCost = penalizedCost(InsertionSortStrategy.ID, (double) n + p.inversions(), n, registry);
             if (insertionCost < bestCost && withinSmartBudget(InsertionSortStrategy.ID, n, registry)) {
                 bestId = InsertionSortStrategy.ID;
                 bestCost = insertionCost;
@@ -111,7 +148,7 @@ public final class CostModelStrategySelector implements StrategySelector {
         }
 
         if (p.hasByteSequenceKey()) {
-            double msdCost = 8.0 * n; // ~8 byte passes, distribution-adaptive
+            double msdCost = penalizedCost(MsdRadixSortStrategy.ID, 8.0 * n, n, registry); // ~8 byte passes
             if (msdCost < bestCost && withinSmartBudget(MsdRadixSortStrategy.ID, n, registry)) {
                 bestId = MsdRadixSortStrategy.ID;
                 bestCost = msdCost;
@@ -123,14 +160,14 @@ public final class CostModelStrategySelector implements StrategySelector {
         if (ks != null) {
             long span = ks.span();
             if (ks.countingFeasible() && span >= 0) {
-                double countingCost = (double) n + (span + 1);
+                double countingCost = penalizedCost(CountingSortStrategy.ID, (double) n + (span + 1), n, registry);
                 if (countingCost < bestCost && withinSmartBudget(CountingSortStrategy.ID, n, registry)) {
                     bestId = CountingSortStrategy.ID;
                     bestCost = countingCost;
                     why = "n+range counting (range " + (span + 1) + ")";
                 }
             }
-            double radixCost = RADIX_PASSES * n;
+            double radixCost = penalizedCost(RadixSortStrategy.ID, RADIX_PASSES * n, n, registry);
             if (radixCost < bestCost && withinSmartBudget(RadixSortStrategy.ID, n, registry)) {
                 bestId = RadixSortStrategy.ID;
                 bestCost = radixCost;
@@ -138,7 +175,7 @@ public final class CostModelStrategySelector implements StrategySelector {
             }
             // Learned (sample) sort: distribution-adaptive, near-linear, and unconstrained by key range —
             // so for wide-range integers it beats fixed-pass radix; bounded ranges still favour counting.
-            double learnedCost = LEARNED_PER_ITEM * n;
+            double learnedCost = penalizedCost(LearnedSortStrategy.ID, LEARNED_PER_ITEM * n, n, registry);
             if (learnedCost < bestCost && withinSmartBudget(LearnedSortStrategy.ID, n, registry)) {
                 bestId = LearnedSortStrategy.ID;
                 bestCost = learnedCost;
@@ -148,6 +185,9 @@ public final class CostModelStrategySelector implements StrategySelector {
 
         if (smartAuxBudgetBytes != Long.MAX_VALUE) {
             why += " [aux<=" + (smartAuxBudgetBytes >> 20) + "MB]";
+        }
+        if (auxByteWeight > 0.0) {
+            why += " [aux-penalty " + auxByteWeight + "/byte]";
         }
         return new SortPlan(bestId, FeedMode.BULK, fallback, "cost model -> " + why);
     }
@@ -165,6 +205,24 @@ public final class CostModelStrategySelector implements StrategySelector {
             return true;
         }
         return registry.get(id).capabilities().auxMemory().estimatedBytes(n) <= smartAuxBudgetBytes;
+    }
+
+    /**
+     * The candidate's estimated cost raised by the graded aux penalty: {@code baseCost + auxByteWeight ×}
+     * its declared {@link StrategyCapabilities.AuxMemory#estimatedBytes(long)}. Short-circuits to
+     * {@code baseCost} when no penalty is configured (no registry lookup), so the default objective is
+     * byte-for-byte unchanged and allocation-free; an unknown id is never penalized. Applies under SMART
+     * only — STABLE keeps its own merge→WikiSort crossover.
+     */
+    private double penalizedCost(StrategyId id, double baseCost, int n, StrategyRegistry registry) {
+        if (auxByteWeight == 0.0) {
+            return baseCost;
+        }
+        if (!registry.contains(id)) {
+            return baseCost;
+        }
+        long auxBytes = registry.get(id).capabilities().auxMemory().estimatedBytes(n);
+        return baseCost + auxByteWeight * auxBytes;
     }
 
     /**

@@ -145,4 +145,47 @@ class CostModelSelectorTest {
         // the default (unbudgeted) selector keeps the fixed 16 MB crossover, so the same input stays on merge
         assertEquals("merge", pickStable(p));
     }
+
+    // ---- SMART soft auxiliary-memory penalty (graded, vs the hard over-budget filter) ----
+
+    @Test
+    void tinyAuxPenaltyDoesNotFlipTheChoice() {
+        // lambda = 0.001/byte adds only ~1600 to counting's ~250k cost: far too little to overtake the
+        // introsort baseline, so the graded penalty leaves the fast choice in place.
+        CostModelStrategySelector lightlyPenalized = CostModelStrategySelector.withAuxPenalty(0.001);
+        int n = 200_000;
+        DataProfile p = profile(n, 0.5, new KeyStats(0, 50_000, true));
+        assertEquals("counting", lightlyPenalized.select(p, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void heavyAuxPenaltyFlipsLinearCountingToInPlaceIntrosort() {
+        // lambda = 3/byte: counting's 8n = 1.6 MB LINEAR scratch costs 4.8M extra, lifting it past the
+        // LOGARITHMIC introsort (negligible stack). The flip threshold is ~2.045/byte (verified), so 3 clears
+        // it -- the graded analog of the hard budget's exclusion.
+        CostModelStrategySelector penalized = CostModelStrategySelector.withAuxPenalty(3.0);
+        int n = 200_000;
+        DataProfile p = profile(n, 0.5, new KeyStats(0, 50_000, true));
+        assertEquals("intro", penalized.select(p, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void penaltyComposesWithBudgetAndActsEvenWithinIt() {
+        // Budget == 8n keeps counting (it fits, inclusive) -- proven by budgetEqualToCandidateAuxKeepsThatCandidate.
+        // Adding a lambda=3 penalty to the same budget still flips to introsort, so the soft penalty
+        // discriminates among in-budget candidates the hard cap leaves untouched. The two knobs compose.
+        int n = 200_000;
+        DataProfile p = profile(n, 0.5, new KeyStats(0, 50_000, true));
+        assertEquals("counting",
+                new CostModelStrategySelector(8L * n).select(p, SelectionPolicy.SMART, registry).strategy().value());
+        assertEquals("intro",
+                new CostModelStrategySelector(8L * n, 3.0).select(p, SelectionPolicy.SMART, registry).strategy().value());
+    }
+
+    @Test
+    void negativeOrNaNAuxPenaltyIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> CostModelStrategySelector.withAuxPenalty(-0.1));
+        assertThrows(IllegalArgumentException.class, () -> CostModelStrategySelector.withAuxPenalty(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> new CostModelStrategySelector(1L << 20, -1.0));
+    }
 }

@@ -133,4 +133,16 @@ class CostModelSelectorTest {
     void nonPositiveBudgetIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new CostModelStrategySelector(0));
     }
+
+    @Test
+    void configuredBudgetAlsoLowersTheStableWikiCrossover() {
+        // A 1 MB budget governs STABLE too: merge's 8n scratch reaches it at n=131072, far below the
+        // default 16 MB (2^21) crossover, so a budgeted selector prefers the O(1)-aux WikiSort sooner.
+        CostModelStrategySelector budgeted = new CostModelStrategySelector(1L << 20);
+        int n = 200_000; // 8n = 1.6 MB >= 1 MB budget, but well under the 16 MB default
+        DataProfile p = profile(n, 0.5, null); // profile() sets distinctEstimate == n -> mostly distinct
+        assertEquals("merge.wiki", budgeted.select(p, SelectionPolicy.STABLE, registry).strategy().value());
+        // the default (unbudgeted) selector keeps the fixed 16 MB crossover, so the same input stays on merge
+        assertEquals("merge", pickStable(p));
+    }
 }

@@ -178,13 +178,16 @@ public final class CostModelStrategySelector implements StrategySelector {
         // Memory-budgeted crossover (mirrors RuleBasedStrategySelector): the cost model's comparisons+moves
         // objective never picks WikiSort on its own (plain merge dominates both), so WikiSort is offered
         // only when merge's LINEAR auxiliary memory exceeds the budget AND the data is mostly distinct.
+        // A configured smartAuxBudgetBytes governs this crossover too, so one budget drives both SMART
+        // filtering and the STABLE switch; with no budget set it falls back to the fixed 16 MB threshold.
+        long crossover = (smartAuxBudgetBytes != Long.MAX_VALUE) ? smartAuxBudgetBytes : STABLE_WIKI_CROSSOVER_BYTES;
         long mergeAuxBytes = StrategyCapabilities.AuxMemory.LINEAR.estimatedBytes(p.size());
         boolean mostlyDistinct = p.distinctEstimate() >= (long) (0.9 * p.size());
         // >= (not >): merge needing exactly the budget is already prohibitive, reproducing the old
-        // `size >= 2^21` threshold byte-for-byte (8 B * 2^21 == 16 MB).
-        if (mergeAuxBytes >= STABLE_WIKI_CROSSOVER_BYTES && mostlyDistinct) {
+        // `size >= 2^21` threshold byte-for-byte (8 B * 2^21 == 16 MB) when no budget is configured.
+        if (mergeAuxBytes >= crossover && mostlyDistinct) {
             return new SortPlan(WikiSortStrategy.ID, FeedMode.BULK, fallback,
-                    "merge scratch ~" + (mergeAuxBytes >> 20) + "MB >= " + (STABLE_WIKI_CROSSOVER_BYTES >> 20)
+                    "merge scratch ~" + (mergeAuxBytes >> 20) + "MB >= " + (crossover >> 20)
                             + "MB budget, mostly-distinct (" + p.size() + " elems) -> WikiSort (O(1) aux, O(n log n))");
         }
         return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");

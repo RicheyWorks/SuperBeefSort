@@ -10,6 +10,7 @@ import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
+import io.github.richeyworks.superbeefsort.csrbt.EnsembleAdaptation;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
 import io.github.richeyworks.superbeefsort.csrbt.ProfileGuidedScorer;
 import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
@@ -186,6 +187,20 @@ public final class BeefSort<K> {
         EnsembleOrderedSet<K> ensemble = EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator);
         new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
         return ensemble;
+    }
+
+    /**
+     * Sort, construct + bulk-load the profile-composed {@link EnsembleOrderedSet} (as {@link #buildEnsemble()}),
+     * then wire it to CSRBT's <em>ensemble</em> control plane: the returned {@link EnsembleAdaptation} lets you
+     * report live operations and have the read path <em>promote</em> to whichever member matches the workload —
+     * an O(1) primary swap, no rebuild (docs/architecture-csrbt-integration.md §4). The single-set
+     * {@link #buildAdaptive(MorphPolicy)} morphs one tree; this migrates across pre-built ensemble members.
+     */
+    public EnsembleAdaptation<K> buildAdaptiveEnsemble(MorphPolicy policy) {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        EnsembleOrderedSet<K> ensemble = EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator);
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
+        return EnsembleAdaptation.attach(ensemble, policy);
     }
 
     /**

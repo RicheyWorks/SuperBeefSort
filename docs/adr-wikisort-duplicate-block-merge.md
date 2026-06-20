@@ -1,6 +1,6 @@
 # ADR: Duplicate-tolerant stable block merge for `merge.wiki`
 
-Status: **Proposed** (design only; implementation tracked separately)
+Status: **Superseded by implementation** — the proposed per-merge `blockMergeDup` was *not* shipped as written; `WikiSortStrategy` was instead replaced with a faithful no-cache WikiSort port that handles duplicates natively. See the **Implementation note** at the end for why.
 Date: 2026-06-19
 Component: `strategy/WikiSortStrategy.java`
 
@@ -48,3 +48,13 @@ Add a second block-merge routine, `blockMergeDup`, for non-distinct large region
 - **Standalone harness** (no CSRBT needed): output `==` JDK stable sort across pathological shapes; distinct / near-distinct / duplicate-heavy randomized fuzz (thousands of cases); explicit stability check on `(key, seq)` records with dense ties.
 - **Real `WikiSortTest` + `DifferentialTest`** (incl. the jqwik duplicate-heavy property) via JUnit.
 - **`moveCurve` on duplicate-bearing inputs:** moves/(n·log₂n) should flatten toward the all-distinct curve instead of rising with n.
+
+## Implementation note (correction)
+
+The design above was **not implemented as written.** Working through a verified Python prototype against the reference (BonzaiThePenguin's WikiSort) surfaced two problems with the per-merge framing:
+
+1. **Buffers are per-level, not per-merge.** WikiSort extracts its two √n internal buffers **once per merge level** (shared across every A/B merge in that level) and redistributes them at the end of the level — they are *unique-value* buffers pulled from the data, not the "largest-to-back" buffer the existing distinct fast path pulled per-merge. Bolting a per-merge `blockMergeDup` onto the existing structure therefore fights the proven algorithm's buffer model.
+
+2. **The symmetric "block-sort + origin-tagged seams" is not stable.** Sorting all blocks by `(head, origin)` and then repairing seams left-to-right does not yield a stable result, because the running carry mixes A- and B-origin elements and no single per-block tie-break rule is correct. WikiSort's stability comes from an **asymmetric A-block roll**: B-blocks stay put, A-blocks roll through, and each seam merge is always *one A block vs B values*, so ties always resolve toward A. Block **selection** uses the unique-value tag buffer to break head ties by original order.
+
+**Decision taken:** replace `WikiSortStrategy`'s internals with a faithful no-cache port of WikiSort (Kim & Kutzner block merge) — which handles distinct and duplicate input uniformly — rather than maintain two parallel buffer mechanisms. The all-distinct-only fast path and the threaded-`trustDistinct` comparison optimization it carried are superseded. `StrategyId`, `StrategyCapabilities` (stable + in-place + O(1) aux), and SPI registration are unchanged, so selectors and the engine are untouched. Verified by fuzzing the Python prototype to stability (~7k cases) and re-fuzzing a Python mirror transcribed back from the Java port (~7.4k cases) to catch translation drift; gated on `WikiSortTest` + `DifferentialTest` in the build.

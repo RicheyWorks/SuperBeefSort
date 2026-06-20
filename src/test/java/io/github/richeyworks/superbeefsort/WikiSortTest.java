@@ -100,6 +100,66 @@ class WikiSortTest {
     }
 
     @Test
+    void stableForDenseDuplicatesAtScale() {
+        // Large input with a small key space: the block-merge roll runs over many levels with duplicate
+        // block heads, so this exercises the unique-value tag buffer + origin-stable selection at scale
+        // (the path that previously degraded to the rotation merge whenever a duplicate appeared).
+        Random r = new Random(123);
+        List<Item> in = new ArrayList<>();
+        for (int i = 0; i < 20_000; i++) {
+            in.add(new Item(r.nextInt(40), i));
+        }
+        Comparator<Item> byKey = Comparator.comparingInt(Item::key);
+        SortBuffer<Item> b = SortBuffer.of(in, byKey);
+        new WikiSortStrategy<Item>().sort(b, SortContext.noop());
+        List<Item> out = b.toList();
+
+        List<Item> expected = new ArrayList<>(in);
+        expected.sort(byKey);
+        assertEquals(expected, out);
+        for (int i = 1; i < out.size(); i++) {
+            if (out.get(i - 1).key() == out.get(i).key()) {
+                assertTrue(out.get(i - 1).seq() < out.get(i).seq(), "equal keys keep input order");
+            }
+        }
+    }
+
+    @Test
+    void stableForNearDistinctWithSparseDuplicates() {
+        // The case the duplicate-tolerant path most cares about: a mostly-distinct large array with a
+        // handful of duplicate keys. A single duplicate used to pull the whole top-level merge onto the
+        // O(n log^2 n) rotation path; now it stays on the block-merge roll and remains stable.
+        Random r = new Random(77);
+        List<Item> in = new ArrayList<>();
+        for (int i = 0; i < 20_000; i++) {
+            in.add(new Item(i, i)); // distinct keys
+        }
+        for (int k = 0; k < 60; k++) {
+            int i = r.nextInt(in.size());
+            in.set(i, new Item(r.nextInt(in.size()), in.get(i).seq())); // inject sparse collisions
+        }
+        Collections.shuffle(in, new Random(5));
+        // re-stamp seq to reflect the (post-shuffle) input order we want stability against
+        List<Item> stamped = new ArrayList<>(in.size());
+        for (int i = 0; i < in.size(); i++) {
+            stamped.add(new Item(in.get(i).key(), i));
+        }
+        Comparator<Item> byKey = Comparator.comparingInt(Item::key);
+        SortBuffer<Item> b = SortBuffer.of(stamped, byKey);
+        new WikiSortStrategy<Item>().sort(b, SortContext.noop());
+        List<Item> out = b.toList();
+
+        List<Item> expected = new ArrayList<>(stamped);
+        expected.sort(byKey);
+        assertEquals(expected, out);
+        for (int i = 1; i < out.size(); i++) {
+            if (out.get(i - 1).key() == out.get(i).key()) {
+                assertTrue(out.get(i - 1).seq() < out.get(i).seq(), "equal keys keep input order");
+            }
+        }
+    }
+
+    @Test
     void advertisesStableInPlace() {
         var caps = new WikiSortStrategy<Integer>().capabilities();
         assertTrue(caps.stable(), "stable");

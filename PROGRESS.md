@@ -48,5 +48,5 @@ All items below are committed to `main` and tests are green.
 
 ## Next steps (ideas)
 
-- **CSRBT integration — remaining gaps (see `docs/adr-csrbt-integration-deepening.md`).** Gap 5: derive the `ProfileGuidedScorer` prior strength from realized run signals. Also still open: a forced-failover integration test for `EnsembleAdaptation.checkHealth()` (the path is wired, only smoke-covered). (`../CSRBT` is mounted, so its API is readable.)
+- **CSRBT integration — remaining gap (see `docs/adr-csrbt-integration-deepening.md`).** Gap 5: derive the `ProfileGuidedScorer` prior strength from realized run signals — the one design refinement still open. (The ensemble failover/quarantine/heal path is now tested end-to-end via `EnsembleHealthAdaptationTest`, mirroring CSRBT's `EnsembleHealthTest` through the adapter.) `../CSRBT` is mounted, so its API is readable.
 - **Soft `λ · auxBytes` penalty (optional, low priority).** A static graded memory term in `CostModelStrategySelector`'s SMART objective, as an alternative to the hard exclude-over-budget filter. Now largely subsumed: the deterministic STABLE/SMART budget already gives a hard cap, and `BanditStrategySelector.costWithMemory` gives a graded, *observation-driven* trade-off — so a static `λ` on the cost model is only worth adding if a deterministic graded knob (without the bandit) is specifically wanted.

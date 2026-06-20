@@ -91,7 +91,10 @@ wired to adapt; `buildAdaptive(policy)` / `buildAdaptiveEnsemble(policy)` return
 wired to CSRBT's control plane so it keeps re-tuning to live traffic — a single-tree morph, or an **O(1)
 read-path promotion** across pre-built ensemble members; `streaming(set, maxSize)` does a bounded sliding-window feed; `adaptiveStream(set, maxSize)`
 returns a drift-aware multi-batch driver; and `sortByteKeys(encoder)` runs the MSD radix over string /
-byte-array keys. And from the Streams API,
+byte-array keys. Once built, `OrderStats.of(set)` / `OrderStats.ofEnsemble(ensemble)` give a uniform
+order-statistics view (`median`, `percentile`, `select` / `rank`, `rangeQuery`) — the payoff of feeding an
+*ordered* structure, and the way to read those statistics off an ensemble (which exposes only the basics).
+And from the Streams API,
 `stream.collect(BeefCollectors.toOrderedSet(cmp, enc))` runs the whole pipeline as a sink — sequential
 or parallel.
 

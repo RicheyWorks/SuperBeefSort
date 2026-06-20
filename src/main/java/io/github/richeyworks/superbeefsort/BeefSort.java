@@ -11,6 +11,7 @@ import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleAdaptation;
+import io.github.richeyworks.superbeefsort.csrbt.EnsembleSpec;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
 import io.github.richeyworks.superbeefsort.csrbt.ProfileGuidedScorer;
 import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
@@ -179,28 +180,40 @@ public final class BeefSort<K> {
 
     /**
      * Sort, then <em>construct and bulk-load</em> a CSRBT {@link EnsembleOrderedSet} composed from the profile
-     * (primary born with the access-advised strategy + a RedBlack replica), via the O(n)/member parallel
-     * bulk path. The "ensemble as a first-class target" pattern — see docs/architecture-csrbt-integration.md §4.
+     * via the O(n)/member parallel bulk path — the default {@link EnsembleSpec#lean()} mix (access-advised
+     * primary + a RedBlack replica). The "ensemble as a first-class target" pattern, docs §4.
      */
     public EnsembleOrderedSet<K> buildEnsemble() {
+        return buildEnsemble(EnsembleSpec.lean());
+    }
+
+    /**
+     * As {@link #buildEnsemble()} but with an explicit {@link EnsembleSpec} member mix — e.g.
+     * {@link EnsembleSpec#adaptive()} for a promotable RedBlack+AVL+Splay trio, or {@code .withSnapshot()} to
+     * add an O(1)-snapshot persistent member for time-travel reads.
+     */
+    public EnsembleOrderedSet<K> buildEnsemble(EnsembleSpec ensembleSpec) {
         SortRunResult<K> run = engine().sort(source, comparator, spec());
-        EnsembleOrderedSet<K> ensemble = EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator);
+        EnsembleOrderedSet<K> ensemble =
+                EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator, ensembleSpec);
         new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
         return ensemble;
     }
 
     /**
-     * Sort, construct + bulk-load the profile-composed {@link EnsembleOrderedSet} (as {@link #buildEnsemble()}),
-     * then wire it to CSRBT's <em>ensemble</em> control plane: the returned {@link EnsembleAdaptation} lets you
-     * report live operations and have the read path <em>promote</em> to whichever member matches the workload —
-     * an O(1) primary swap, no rebuild (docs/architecture-csrbt-integration.md §4). The single-set
-     * {@link #buildAdaptive(MorphPolicy)} morphs one tree; this migrates across pre-built ensemble members.
+     * Sort, build a <em>promotable</em> ensemble — the {@link EnsembleSpec#adaptive()} RedBlack+AVL+Splay mix
+     * by default, so the read path has somewhere to migrate — then wire it to CSRBT's ensemble control plane:
+     * the returned {@link EnsembleAdaptation} lets you report live operations and have the read path
+     * <em>promote</em> to whichever member matches the workload — an O(1) primary swap, no rebuild (docs §4).
+     * The single-set {@link #buildAdaptive(MorphPolicy)} morphs one tree; this migrates across pre-built members.
      */
     public EnsembleAdaptation<K> buildAdaptiveEnsemble(MorphPolicy policy) {
-        SortRunResult<K> run = engine().sort(source, comparator, spec());
-        EnsembleOrderedSet<K> ensemble = EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator);
-        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
-        return EnsembleAdaptation.attach(ensemble, policy);
+        return buildAdaptiveEnsemble(EnsembleSpec.adaptive(), policy);
+    }
+
+    /** As {@link #buildAdaptiveEnsemble(MorphPolicy)} but with an explicit {@link EnsembleSpec} member mix. */
+    public EnsembleAdaptation<K> buildAdaptiveEnsemble(EnsembleSpec ensembleSpec, MorphPolicy policy) {
+        return EnsembleAdaptation.attach(buildEnsemble(ensembleSpec), policy);
     }
 
     /**

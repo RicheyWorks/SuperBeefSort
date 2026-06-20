@@ -116,7 +116,8 @@ public final class AdaptiveStreamSorter<K> {
         strategy.sort(buffer, new SortContext(observer, OptionalLong.empty()));
         long elapsed = System.nanoTime() - t0;
         SortResult metrics = new SortResult(strategy.id(), buffer.size(),
-                buffer.comparisons() - beforeComparisons, buffer.moves() - beforeMoves, elapsed);
+                buffer.comparisons() - beforeComparisons, buffer.moves() - beforeMoves, elapsed,
+                buffer.peakAuxBytes());
 
         // Close the learning loop for self-tuning selectors, exactly as BeefSortEngine.sort does.
         if (selector instanceof LearningStrategySelector learner) {

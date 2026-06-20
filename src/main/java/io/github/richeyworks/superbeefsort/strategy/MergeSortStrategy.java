@@ -22,6 +22,7 @@ public final class MergeSortStrategy<K> implements SortStrategy<K> {
         }
         List<K> work = b.toList();
         List<K> aux = new ArrayList<>(work); // same size; scratch space
+        b.recordAux(16L * n); // two n-element reference lists (working copy + merge scratch)
         mergeSort(b, work, aux, 0, n);
         for (int i = 0; i < n; i++) {
             b.set(i, work.get(i));

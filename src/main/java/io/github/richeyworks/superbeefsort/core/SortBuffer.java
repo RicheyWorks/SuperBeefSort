@@ -25,6 +25,7 @@ public final class SortBuffer<K> {
     private final ByteSequenceEncoder<K> byteSequenceEncoder; // may be null
     private long comparisons;
     private long moves;
+    private long peakAuxBytes;
 
     private SortBuffer(Object[] a, Comparator<? super K> comparator,
                        KeyEncoder<K> keyEncoder, ByteSequenceEncoder<K> byteSequenceEncoder) {
@@ -102,6 +103,18 @@ public final class SortBuffer<K> {
         moves++;
     }
 
+    /**
+     * Record a strategy's auxiliary (scratch) allocation in bytes; the buffer keeps the peak seen across a
+     * run. In-place strategies never call this, so their {@link #peakAuxBytes()} stays 0 — which is what
+     * lets a memory-aware observer distinguish, say, a 4-array LSD radix from a single-buffer merge even
+     * though both are coarsely {@code LINEAR}. A measured signal, finer than the static capability estimate.
+     */
+    public void recordAux(long bytes) {
+        if (bytes > peakAuxBytes) {
+            peakAuxBytes = bytes;
+        }
+    }
+
     public Comparator<? super K> comparator() {
         return comparator;
     }
@@ -133,6 +146,11 @@ public final class SortBuffer<K> {
 
     public long moves() {
         return moves;
+    }
+
+    /** Peak auxiliary (scratch) bytes the strategy reported via {@link #recordAux}; 0 for in-place sorts. */
+    public long peakAuxBytes() {
+        return peakAuxBytes;
     }
 
     @SuppressWarnings("unchecked")

@@ -69,6 +69,7 @@ public final class MsdRadixSortStrategy<K> implements SortStrategy<K> {
         }
         Object[] aux = new Object[n];
         int[] count = new int[BUCKETS + 1];
+        b.recordAux(16L * n + 4L * (BUCKETS + 1)); // Object items[n] + aux[n] + int count[BUCKETS]
 
         ArrayDeque<int[]> stack = new ArrayDeque<>();
         stack.push(new int[]{0, n, 0});

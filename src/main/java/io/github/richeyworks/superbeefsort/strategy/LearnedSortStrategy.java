@@ -71,6 +71,7 @@ public final class LearnedSortStrategy<K> implements SortStrategy<K> {
         // stable scatter into aux by bucket (i ascending + cursor++ keeps equal elements in input order)
         Object[] aux = new Object[n];
         int[] cursor = Arrays.copyOf(start, buckets);
+        b.recordAux(28L * n); // long keys[n] + Object items[n] + int bucketOf[n] + Object aux[n] (+ O(buckets))
         for (int i = 0; i < n; i++) {
             int bk = bucketOf[i];
             aux[cursor[bk]++] = items[i];

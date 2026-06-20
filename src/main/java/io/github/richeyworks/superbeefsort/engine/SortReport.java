@@ -16,6 +16,7 @@ public record SortReport(
         int size,
         long comparisons,
         long moves,
+        long peakAuxBytes,
         double sortMillis,
         boolean fed,
         FeedMode feedMode,   // null for a sort-only job
@@ -39,11 +40,11 @@ public record SortReport(
     public static <K> SortReport of(SortRunResult<K> run) {
         SortResult m = run.sortMetrics();
         if (!run.wasFed()) {
-            return new SortReport(m.strategyId(), m.size(), m.comparisons(), m.moves(), m.elapsedMillis(),
+            return new SortReport(m.strategyId(), m.size(), m.comparisons(), m.moves(), m.peakAuxBytes(), m.elapsedMillis(),
                     false, null, 0, 0, true, 0.0);
         }
         FeedResult f = run.feedResult();
-        return new SortReport(m.strategyId(), m.size(), m.comparisons(), m.moves(), m.elapsedMillis(),
+        return new SortReport(m.strategyId(), m.size(), m.comparisons(), m.moves(), m.peakAuxBytes(), m.elapsedMillis(),
                 true, f.mode(), f.inserted(), f.duplicates(), f.healthy(), f.elapsedMillis());
     }
 
@@ -54,6 +55,7 @@ public record SortReport(
                 .append("  n=").append(size)
                 .append("  ").append(comparisons).append(" cmp")
                 .append("  ").append(moves).append(" mv")
+                .append("  ").append(peakAuxBytes).append(" auxB")
                 .append(String.format("  %.2f ms sort", sortMillis));
         if (fed) {
             sb.append("  ->  ").append(feedMode)

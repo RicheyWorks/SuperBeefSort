@@ -21,6 +21,7 @@ public final class JdkSortStrategy<K> implements SortStrategy<K> {
     public void sort(SortBuffer<K> b, SortContext context) {
         int n = b.size();
         List<K> list = new ArrayList<>(n);
+        b.recordAux(8L * n); // an n-element reference copy (TimSort also allocates ~n/2 scratch internally)
         for (int i = 0; i < n; i++) {
             list.add(b.get(i));
         }

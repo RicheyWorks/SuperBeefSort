@@ -69,6 +69,7 @@ public final class RadixSortStrategy<K> implements SortStrategy<K> {
         long[] tmpKeys = new long[n];
         Object[] tmpItems = new Object[n];
         int[] count = new int[radix + 1];
+        b.recordAux(32L * n + 4L * (radix + 1)); // long+Object keys/items and their tmp copies, + count[radix]
 
         for (int p = 0; p < plan.passes(); p++) {
             int shift = p * bits;

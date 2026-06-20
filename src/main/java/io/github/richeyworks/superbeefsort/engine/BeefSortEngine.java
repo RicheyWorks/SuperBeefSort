@@ -113,7 +113,8 @@ public final class BeefSortEngine<K> {
         long elapsed = System.nanoTime() - t0;
 
         SortResult metrics = new SortResult(strategy.id(), buffer.size(),
-                buffer.comparisons() - beforeComparisons, buffer.moves() - beforeMoves, elapsed);
+                buffer.comparisons() - beforeComparisons, buffer.moves() - beforeMoves, elapsed,
+                buffer.peakAuxBytes());
 
         // Close the learning loop: a self-tuning selector observes what the chosen strategy actually
         // cost on this input, so its next choice for similar data is informed by reality. Opt-in —

@@ -60,6 +60,7 @@ public final class CountingSortStrategy<K> implements SortStrategy<K> {
             acc += c;
         }
         Object[] out = new Object[n];
+        b.recordAux(16L * n + 4L * range); // long keys[n] + Object out[n] + int count[range]
         for (int i = 0; i < n; i++) {
             int v = (int) (keys[i] - min);
             out[count[v]++] = b.get(i);

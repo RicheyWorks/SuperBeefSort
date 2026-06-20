@@ -32,7 +32,7 @@ class BanditSelectorTest {
     }
 
     private static SortResult outcome(StrategyId id, int n, double cost) {
-        return new SortResult(id, n, (long) cost, 0L, 0L); // cost = comparisons + moves (default cost fn)
+        return new SortResult(id, n, (long) cost, 0L, 0L, 0L); // cost = comparisons + moves (default cost fn)
     }
 
     /** Drive the closed loop: select -> run (synthetic cost) -> observe, for {@code rounds} jobs. */

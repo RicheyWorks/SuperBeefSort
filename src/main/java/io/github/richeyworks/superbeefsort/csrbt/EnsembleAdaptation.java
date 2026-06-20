@@ -8,6 +8,7 @@ import io.github.richeyworks.csrbt.control.StrategyScorer;
 import io.github.richeyworks.csrbt.control.WorkloadMonitor;
 import io.github.richeyworks.csrbt.ensemble.EnsembleController;
 import io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet;
+import io.github.richeyworks.superbeefsort.core.SortResult;
 import io.github.richeyworks.superbeefsort.profile.DataProfile;
 
 import java.util.Objects;
@@ -74,6 +75,21 @@ public final class EnsembleAdaptation<K> {
                                                                DataProfile profile, AccessPolicy access,
                                                                MorphPolicy policy) {
         return attach(ensemble, new RollingWorkloadMonitor(), ProfileGuidedScorer.forProfile(profile, access), policy);
+    }
+
+    /**
+     * As {@link #attachProfileGuided(EnsembleOrderedSet, DataProfile, AccessPolicy, MorphPolicy)} but with the
+     * prior <em>strength</em> {@linkplain ProfileGuidedScorer#derivePrior derived from the realized sort run}
+     * ({@code metrics}) rather than fixed at {@link ProfileGuidedScorer#DEFAULT_PRIOR} — the ensemble analog of
+     * the Gap&nbsp;5 handoff: a clean, cheap, exactly-measured run nudges the read path harder toward the
+     * favored member, an expensive/uncertain run more softly. A {@code null} {@code metrics} reproduces the
+     * fixed-prior overload. The "two engines talking" wiring for promotion ({@code BeefSort.buildCoOptimizedEnsemble}).
+     */
+    public static <K> EnsembleAdaptation<K> attachProfileGuided(EnsembleOrderedSet<K> ensemble,
+                                                               DataProfile profile, AccessPolicy access,
+                                                               SortResult metrics, MorphPolicy policy) {
+        return attach(ensemble, new RollingWorkloadMonitor(),
+                ProfileGuidedScorer.forRun(profile, access, metrics), policy);
     }
 
     /** The live ensemble: route reads/writes through this adapter, which is the one promoted in place. */

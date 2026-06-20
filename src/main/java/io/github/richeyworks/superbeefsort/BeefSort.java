@@ -217,6 +217,28 @@ public final class BeefSort<K> {
     }
 
     /**
+     * The ensemble analog of {@link #buildCoOptimized(MorphPolicy)}: sort, build a <em>promotable</em>
+     * ensemble (the {@link EnsembleSpec#adaptive()} RedBlack+AVL+Splay mix by default), bulk-load it, then
+     * wire it to CSRBT's ensemble control plane with a {@link ProfileGuidedScorer} prior whose
+     * <em>strength</em> is {@linkplain ProfileGuidedScorer#derivePrior derived from the realized run} — so the
+     * read path starts migrating toward the profile-favored member, harder when the sort was clean/cheap and
+     * exactly measured, before live traffic has fully spoken. Where {@link #buildAdaptiveEnsemble(MorphPolicy)}
+     * attaches an unbiased controller, this primes promotion with the sort's measured signal (docs §4 / Gap 5).
+     */
+    public EnsembleAdaptation<K> buildCoOptimizedEnsemble(MorphPolicy policy) {
+        return buildCoOptimizedEnsemble(EnsembleSpec.adaptive(), policy);
+    }
+
+    /** As {@link #buildCoOptimizedEnsemble(MorphPolicy)} but with an explicit {@link EnsembleSpec} member mix. */
+    public EnsembleAdaptation<K> buildCoOptimizedEnsemble(EnsembleSpec ensembleSpec, MorphPolicy policy) {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        EnsembleOrderedSet<K> ensemble =
+                EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator, ensembleSpec);
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
+        return EnsembleAdaptation.attachProfileGuided(ensemble, run.profile(), accessPolicy, run.sortMetrics(), policy);
+    }
+
+    /**
      * Sort, construct the born-optimal {@link OrderedSet} (as {@link #buildOrderedSet()}), then wire it to
      * CSRBT's self-adaptive control plane under {@code policy}: the returned {@link WorkloadAdaptation} lets
      * you report live operations and have the tree re-tune its strategy to the observed workload — "born

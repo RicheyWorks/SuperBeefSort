@@ -8,10 +8,12 @@ import io.github.richeyworks.superbeefsort.profile.KeyStats;
 import io.github.richeyworks.superbeefsort.profile.ProfileDepth;
 import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
 import io.github.richeyworks.superbeefsort.select.BanditStrategySelector;
+import io.github.richeyworks.superbeefsort.select.RuleBasedStrategySelector;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -175,5 +177,44 @@ class BanditSelectorTest {
     @Test
     void nonPositiveBudgetIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new BanditStrategySelector(0L));
+    }
+
+    @Test
+    void memoryWeightedCostSteersAwayFromScratchHeavySorts() {
+        // cost = comparisons + moves + 1 * peakAuxBytes. Every arm reports equal comparisons+moves, but the
+        // LINEAR-aux sorts report large measured scratch (merge 16n, TimSort 8n) while the in-place sorts
+        // report 0, so the memory term decides -> the UCB converges to a zero-aux in-place sort.
+        int n = 50_000;
+        BanditStrategySelector bandit = new BanditStrategySelector(
+                0.7, new RuleBasedStrategySelector(), BanditStrategySelector.costWithMemory(1.0));
+        DataProfile p = profile(n, 0.5, null);
+        Map<String, Long> peakAux = Map.of("merge", 16L * n, "jdk.timsort", 8L * n); // others -> 0 (in-place)
+        for (int i = 0; i < 400; i++) {
+            StrategyId id = bandit.select(p, SelectionPolicy.SMART, registry).strategy();
+            long peak = peakAux.getOrDefault(id.value(), 0L);
+            bandit.observe(p, id, new SortResult(id, n, 100_000L, 100_000L, 0L, peak)); // equal work; memory differs
+        }
+        String winner = bandit.select(p, SelectionPolicy.SMART, registry).strategy().value();
+        assertNotEquals("merge", winner);
+        assertNotEquals("jdk.timsort", winner);
+        assertTrue(Set.of("intro", "quick.threeway", "heap").contains(winner),
+                "expected a zero-aux in-place sort, got " + winner);
+    }
+
+    @Test
+    void zeroWeightMemoryCostMatchesDefaultObjective() {
+        // costWithMemory(0) == comparisons + moves: the memory term vanishes, so it learns the cheapest
+        // comparisons+moves arm exactly like the default cost function.
+        BanditStrategySelector bandit = new BanditStrategySelector(
+                0.7, new RuleBasedStrategySelector(), BanditStrategySelector.costWithMemory(0.0));
+        DataProfile p = profile(50_000, 0.5, null);
+        Map<String, Double> truth = Map.of("jdk.timsort", 100_000.0, "intro", 780_000.0,
+                "quick.threeway", 800_000.0, "merge", 820_000.0, "heap", 1_200_000.0);
+        for (int i = 0; i < 300; i++) {
+            StrategyId id = bandit.select(p, SelectionPolicy.SMART, registry).strategy();
+            double c = truth.getOrDefault(id.value(), 900_000.0);
+            bandit.observe(p, id, new SortResult(id, p.size(), (long) c, 0L, 0L, 1234L)); // aux ignored at weight 0
+        }
+        assertEquals("jdk.timsort", bandit.select(p, SelectionPolicy.SMART, registry).strategy().value());
     }
 }

@@ -110,6 +110,18 @@ public final class BanditStrategySelector implements LearningStrategySelector {
         this.auxBudgetBytes = auxBudgetBytes;
     }
 
+    /**
+     * A cost function that augments comparisons + moves with a penalty on the measured
+     * {@link SortResult#peakAuxBytes()}, so the bandit learns to avoid scratch-heavy sorts under memory
+     * pressure. Pass it as the {@code cost} argument: {@code new BanditStrategySelector(0.7, base,
+     * BanditStrategySelector.costWithMemory(w))}. {@code bytesWeight} is the cost charged per auxiliary byte;
+     * 0 reproduces the default comparisons + moves objective. Pairs with the per-strategy {@code recordAux}
+     * metering — in-place sorts report 0 aux, so only the scratch-allocating sorts are penalized.
+     */
+    public static ToDoubleFunction<SortResult> costWithMemory(double bytesWeight) {
+        return r -> (double) (r.comparisons() + r.moves()) + bytesWeight * r.peakAuxBytes();
+    }
+
     @Override
     public SortPlan select(DataProfile p, SelectionPolicy policy, StrategyRegistry registry) {
         if (policy != SelectionPolicy.SMART) {

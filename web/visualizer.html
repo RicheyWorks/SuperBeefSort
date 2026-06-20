@@ -630,7 +630,14 @@
         case "counting": { const range=p.keyStats?(p.keyStats.span+1):n; return n+Math.max(1,range); }
         case "radix.lsd": return 8*n;
         case "insertion": return p.inversions!=null ? n+p.inversions : n+(1-s)*n*n*0.25;  // exact adaptive cost at viz scale
-        case "jdk.timsort": { const runs=Math.max(1,Math.round((1-s)*(n-1))+1); return 1.3*n*(Math.log(runs)/Math.LN2+1); }
+        case "jdk.timsort": {                                  // galloping-aware (mirrors CostModelStrategySelector):
+          const runs=Math.max(1,Math.round((1-s)*(n-1))+1);    // adjacency run count drives cost, but merge levels
+          let mergeLevels=Math.log(runs)/Math.LN2;             // gallop toward O(n) when BOTH adjacency and the
+          if (p.inversionRatio!=null) {                        // measured global inversions agree it's ordered
+            const globalOrder=Math.min(s, 1-p.inversionRatio); // (no measurement -> old adjacency-only estimate)
+            mergeLevels*= (1-0.4*globalOrder);
+          }
+          return 1.3*n*(mergeLevels+1); }
         case "heap": return 1.6*n*log2n;
         case "merge": return 1.1*n*log2n;
         case "quick.threeway": return n*log2n;

@@ -135,16 +135,19 @@ public final class CostModelStrategySelector implements StrategySelector {
         // Galloping-aware merge cost. The run count comes from adjacency — the right driver for TimSort, since
         // a rotation or a far-apart swap is only a couple of runs and genuinely cheap, which the global
         // inversion count would wrongly inflate. But TimSort's merges *gallop* (collapsing toward O(n)) only
-        // when the data is ordered GLOBALLY, not merely locally; so the global inversion signal is folded in
-        // here as a discount on the merge levels, gated on BOTH signals agreeing the data is ordered:
-        // globalOrder = min(adjacency sortedness, 1 - inversionRatio). When adjacency looks tidy but the
-        // inversion count reveals hidden disorder (high inversionRatio), the discount is suppressed and TimSort
-        // is not over-credited; when no inversion count was measured, inversionRatio falls back to
-        // (1 - sortedness) so min() is a no-op and the estimate is the original adjacency-only one. Safe against
-        // a noisy inversion sample: it can only *reduce* the discount (capped by the local sortedness), never
-        // inflate it, and TimSort is O(n log n) regardless.
-        double globalOrder = Math.min(p.sortednessRatio(), 1.0 - p.inversionRatio());
-        double mergeLevels = (Math.log(runs) / LN2) * (1.0 - GALLOP_DISCOUNT * globalOrder);
+        // when the data is ordered GLOBALLY, not merely locally; so WHEN an inversion count was measured, fold
+        // it in as a discount on the merge levels, gated on BOTH signals agreeing the data is ordered:
+        // globalOrder = min(adjacency sortedness, 1 - inversionRatio). The min means a locally-tidy-but-
+        // globally-disordered input (high inversionRatio) is not over-credited, and it caps the discount at the
+        // local sortedness, so even a sampled inversion estimate can only *reduce* it (TimSort is O(n log n)
+        // regardless). With no inversion measurement the discount is skipped, leaving the original
+        // adjacency-only estimate byte-for-byte.
+        double mergeLevels = Math.log(runs) / LN2;
+        double globalOrder = 0.0;
+        if (p.inversionsMeasured()) {
+            globalOrder = Math.min(p.sortednessRatio(), 1.0 - p.inversionRatio());
+            mergeLevels *= (1.0 - GALLOP_DISCOUNT * globalOrder);
+        }
         double timsortCost = penalizedCost(JdkSortStrategy.ID,
                 TIMSORT_OVERHEAD * n * (mergeLevels + 1.0), n, registry); // +1 guards runs == 1
         if (timsortCost < bestCost && withinSmartBudget(JdkSortStrategy.ID, n, registry)) {

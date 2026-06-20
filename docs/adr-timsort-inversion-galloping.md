@@ -43,8 +43,10 @@ Keep the adjacency run-count, and fold the inversion signal in as a **galloping 
 levels**, gated on *both* signals agreeing the data is ordered:
 
 ```
-globalOrder = min(sortednessRatio, 1 - inversionRatio())          // in [0,1]
-mergeLevels = log2(runs) · (1 - GALLOP_DISCOUNT · globalOrder)     // GALLOP_DISCOUNT = 0.4
+mergeLevels = log2(runs)
+if inversions were measured:                                       // else: original adjacency-only estimate
+    globalOrder = min(sortednessRatio, 1 - inversionRatio)         // in [0,1]
+    mergeLevels *= (1 - GALLOP_DISCOUNT · globalOrder)             // GALLOP_DISCOUNT = 0.4
 timsortCost = TIMSORT_OVERHEAD · n · (mergeLevels + 1)
 ```
 
@@ -58,8 +60,8 @@ whose discount is harmless, since their run-count is tiny anyway).
 **Safety.** `min(...)` caps the discount at the local `sortednessRatio`, so a noisy or sampled inversion
 estimate can only *reduce* the discount, never inflate it — and TimSort is O(n log n) regardless, so there is
 no O(n²) cliff (unlike the insertion route, which is exact-gated for that reason). When no inversion count was
-measured, `inversionRatio()` falls back to `1 - sortednessRatio`, making `min()` a no-op so the estimate is
-**byte-identical** to the previous adjacency-only one. No exact-gating is needed.
+measured the discount is **skipped entirely**, so the estimate is **byte-identical** to the previous
+adjacency-only one. No exact-gating is needed — a sampled count is safe to use.
 
 ## Consequences
 

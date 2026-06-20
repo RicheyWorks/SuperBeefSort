@@ -32,7 +32,7 @@ interfaces.
 | 2 | Rust radix kernel via Panama FFM (Java fallback retained) | **PoC proven** ([`phase2-ffm/`](phase2-ffm/)); productization planned |
 | 3 | Ensemble **parallel mirror feed** (O(n)/member bulk-build) · **bounded streaming feed** with health backpressure · born-optimal CSRBT builds + adaptation | ✅ done |
 | 4–5 | Python ML selection · distributed / external sort | planned |
-| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **entropy-aware LSD radix** (offset-by-min, adaptive base) · **stable in-place merge** (O(1) aux) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
+| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **entropy-aware LSD radix** (offset-by-min, adaptive base) · **stable in-place merge** (O(1) aux) · **WikiSort block merge** (`merge.wiki` — O(n log n) stable, O(1) aux, native duplicate handling) · **memory-aware selection** (declared `AuxMemory` + *measured* peak-aux metering, an opt-in auxiliary-memory budget across SMART/STABLE/facade, and a memory-weighted bandit cost) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
 
 ## Build & test
 
@@ -80,8 +80,10 @@ BeefSort.with(Comparator.<Integer>naturalOrder())
 Without a `keyEncoder`, the engine behaves exactly like Phase 0 (comparison sorts only). Swap the
 selection brain with `.selector(new BanditStrategySelector())` — it learns the cheapest strategy per
 data shape across runs — add `.deterministic(seed)` for an exactly reproducible run (it seeds the
-randomized quicksort pivot), and call `SortReport.of(result)` for a one-line dashboard of comparisons,
-moves, feed time, and end-to-end throughput.
+randomized quicksort pivot), cap the scratch a `SMART`/`STABLE` selection may use with
+`.maxAuxMemory(bytes)` (it degrades to in-place sorts under memory pressure), and call
+`SortReport.of(result)` for a one-line dashboard of comparisons, moves, **measured peak aux**, feed
+time, and end-to-end throughput.
 
 Beyond `feedInto(set)`, the facade offers other terminals: `buildOrderedSet()` / `buildEnsemble()`
 construct a CSRBT target born-optimal in O(n); `buildCoOptimized(policy)` builds it born-optimal **and**
@@ -98,8 +100,8 @@ One pipeline, every stage pluggable:
 | Stage | Component | Behavior |
 |-------|-----------|----------|
 | Profile | `IntelligentDataProfiler` | sortedness + longest run + a true **inversion count** (global disorder, exact or sampled), distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
-| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; genuinely-few-inversion inputs route to adaptive insertion, and the cost-model/bandit can pick the learned sort — the bandit learns the cheapest per context from observed cost |
-| Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · **in-place merge** (stable, O(1) aux) · 3-way quick · heap · intro · JDK · counting · **entropy-aware LSD radix** · **MSD radix** (string/byte keys) · **learned** (distribution-adaptive sample sort) |
+| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; genuinely-few-inversion inputs route to adaptive insertion, and the cost-model/bandit can pick the learned sort — the bandit learns the cheapest per context from observed cost; an optional auxiliary-memory budget steers selection toward in-place sorts under memory pressure |
+| Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · **in-place merge** (stable, O(1) aux) · **WikiSort block merge** (stable, O(1) aux, O(n log n), native duplicates) · 3-way quick · heap · intro · JDK · counting · **entropy-aware LSD radix** · **MSD radix** (string/byte keys) · **learned** (distribution-adaptive sample sort) |
 | Feed | `SortFeeder` + `CsrbtTarget` | `BulkBuildFeeder` (O(n)) · `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `PrecisionFeeder` (validate-every-insert) · `ParallelFeeder` (mirror-ensemble fan-out) · `StreamingFeeder` (bounded sliding window) · `DirectFeeder` |
 
 ### Design notes
@@ -158,7 +160,7 @@ src/main/java/io/github/richeyworks/superbeefsort/
 ├── core/      SortStrategy, SortBuffer (metered), KeyEncoder, ByteSequenceEncoder, SortContext, SortObserver, SortEvent
 ├── profile/   IntelligentDataProfiler, Hll, DataProfile, KeyStats, Distribution
 ├── select/    StrategySelector · RuleBasedStrategySelector · CostModelStrategySelector · BanditStrategySelector (+ LearningStrategySelector) · SortPlan · SelectionPolicy
-├── strategy/  SortingNetwork · Insertion · Merge · In-place Merge · Quick (3-way) · Heap · Intro · JDK · Counting · LSD Radix · MSD Radix · Learned
+├── strategy/  SortingNetwork · Insertion · Merge · In-place Merge · WikiSort (merge.wiki) · Quick (3-way) · Heap · Intro · JDK · Counting · LSD Radix · MSD Radix · Learned
 ├── registry/  StrategyRegistry, StrategyProvider (SPI), BuiltinStrategyProvider
 ├── feed/      CsrbtTarget, FeedMode, BulkBuildFeeder, BalancedBuildFeeder, HealthGatedFeeder, PrecisionFeeder, ParallelFeeder, StreamingFeeder (+ HealthPolicy), DirectFeeder
 ├── csrbt/     AccessPolicy · StrategyAdvisor · EnsembleTargetFactory · WorkloadAdaptation · ProfileGuidedScorer   (born-optimal builds + co-optimized adaptation)

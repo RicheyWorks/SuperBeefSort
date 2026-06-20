@@ -32,7 +32,7 @@ interfaces.
 | 2 | Rust radix kernel via Panama FFM (Java fallback retained) | **PoC proven** ([`phase2-ffm/`](phase2-ffm/)); productization planned |
 | 3 | Ensemble **parallel mirror feed** (O(n)/member bulk-build) · **bounded streaming feed** with health backpressure · born-optimal CSRBT builds + adaptation | ✅ done |
 | 4–5 | Python ML selection · distributed / external sort | planned |
-| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **entropy-aware LSD radix** (offset-by-min, adaptive base) · **stable in-place merge** (O(1) aux) · **WikiSort block merge** (`merge.wiki` — O(n log n) stable, O(1) aux, native duplicate handling) · **memory-aware selection** (declared `AuxMemory` + *measured* peak-aux metering, an opt-in auxiliary-memory budget across SMART/STABLE/facade, and a memory-weighted bandit cost) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
+| ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **entropy-aware LSD radix** (offset-by-min, adaptive base) · **stable in-place merge** (O(1) aux) · **WikiSort block merge** (`merge.wiki` — O(n log n) stable, O(1) aux, native duplicate handling) · **memory-aware selection** (declared `AuxMemory` + *measured* peak-aux metering, an opt-in auxiliary-memory budget across SMART/STABLE/facade, and a memory-weighted bandit cost) · **CSRBT ensemble promotion** (post-feed read-path migration via `EnsembleController` — an O(1) primary swap) · **post-feed adaptation observability** (`AdaptationReport`; "born-right ⇒ zero morphs" guardrail) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
 
 ## Build & test
 
@@ -87,7 +87,9 @@ time, and end-to-end throughput.
 
 Beyond `feedInto(set)`, the facade offers other terminals: `buildOrderedSet()` / `buildEnsemble()`
 construct a CSRBT target born-optimal in O(n); `buildCoOptimized(policy)` builds it born-optimal **and**
-wired to adapt; `streaming(set, maxSize)` does a bounded sliding-window feed; `adaptiveStream(set, maxSize)`
+wired to adapt; `buildAdaptive(policy)` / `buildAdaptiveEnsemble(policy)` return the built set / ensemble
+wired to CSRBT's control plane so it keeps re-tuning to live traffic — a single-tree morph, or an **O(1)
+read-path promotion** across pre-built ensemble members; `streaming(set, maxSize)` does a bounded sliding-window feed; `adaptiveStream(set, maxSize)`
 returns a drift-aware multi-batch driver; and `sortByteKeys(encoder)` runs the MSD radix over string /
 byte-array keys. And from the Streams API,
 `stream.collect(BeefCollectors.toOrderedSet(cmp, enc))` runs the whole pipeline as a sink — sequential
@@ -131,7 +133,11 @@ constructs the tree *born* in the profile-advised balancing strategy (`StrategyA
 `buildCoOptimized(policy)` goes further — it primes CSRBT's `MorphController` with a `ProfileGuidedScorer`
 prior toward that strategy, so the sort's profile both shapes the tree at birth and seeds its adaptation,
 which then defers to the live access pattern. Drift re-tunes the sort to the data; co-optimization lets the
-sort teach the tree — the same anti-thrash idea (threshold/warmup/cooldown) on both sides.
+sort teach the tree — the same anti-thrash idea (threshold/warmup/cooldown) on both sides. For a
+multi-member target, `buildAdaptiveEnsemble(policy)` wires CSRBT's `EnsembleController` so the read path
+*promotes* to whichever pre-built member matches live traffic — an O(1) primary swap, no rebuild — and both
+adapters expose an `AdaptationReport`, which makes the design's *born-right ⇒ zero morphs* goal an
+assertable test rather than a claim.
 
 ### Performance (measured)
 
@@ -163,7 +169,7 @@ src/main/java/io/github/richeyworks/superbeefsort/
 ├── strategy/  SortingNetwork · Insertion · Merge · In-place Merge · WikiSort (merge.wiki) · Quick (3-way) · Heap · Intro · JDK · Counting · LSD Radix · MSD Radix · Learned
 ├── registry/  StrategyRegistry, StrategyProvider (SPI), BuiltinStrategyProvider
 ├── feed/      CsrbtTarget, FeedMode, BulkBuildFeeder, BalancedBuildFeeder, HealthGatedFeeder, PrecisionFeeder, ParallelFeeder, StreamingFeeder (+ HealthPolicy), DirectFeeder
-├── csrbt/     AccessPolicy · StrategyAdvisor · EnsembleTargetFactory · WorkloadAdaptation · ProfileGuidedScorer   (born-optimal builds + co-optimized adaptation)
+├── csrbt/     AccessPolicy · StrategyAdvisor · EnsembleTargetFactory · WorkloadAdaptation · EnsembleAdaptation · ProfileGuidedScorer · AdaptationReport · EnsembleAdaptationReport   (born-optimal builds · co-optimized + ensemble adaptation · post-feed observability)
 ├── stream/    AdaptiveStreamSorter · DriftDetector · DriftSignal · DriftVerdict · StreamSortResult   (concept-drift streaming)
 ├── engine/    BeefSortEngine, JobSpec, SortRunResult, SortReport
 ├── BeefSort        fluent facade

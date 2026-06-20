@@ -14,7 +14,7 @@ src/main/java/io/github/richeyworks/superbeefsort/
 ├── strategy/  all sort algorithms (see below)
 ├── registry/  StrategyRegistry, StrategyProvider (SPI), BuiltinStrategyProvider
 ├── feed/      CsrbtTarget, FeedMode, BulkBuildFeeder, BalancedBuildFeeder, HealthGatedFeeder, PrecisionFeeder, ParallelFeeder, StreamingFeeder, DirectFeeder
-├── csrbt/     AccessPolicy · StrategyAdvisor · EnsembleTargetFactory · WorkloadAdaptation · ProfileGuidedScorer
+├── csrbt/     AccessPolicy · StrategyAdvisor · EnsembleTargetFactory · WorkloadAdaptation · EnsembleAdaptation · ProfileGuidedScorer · AdaptationReport · EnsembleAdaptationReport
 ├── stream/    AdaptiveStreamSorter · DriftDetector · DriftSignal · DriftVerdict · StreamSortResult
 ├── engine/    BeefSortEngine, JobSpec, SortRunResult, SortReport
 ├── BeefSort        fluent facade
@@ -39,7 +39,7 @@ src/main/java/io/github/richeyworks/superbeefsort/
 
 **`engine/BeefSortEngine.java`** — runs a `JobSpec` end-to-end: profiler → selector → strategy → feeder. Calls `selector.observe(result)` after each run so learning selectors can tune themselves.
 
-**`BeefSort.java`** — the fluent public facade. Entry point for all users. Methods: `.source(list)`, `.keyEncoder(enc)`, `.byteSequenceEncoder(enc)`, `.policy(SelectionPolicy)`, `.selector(sel)`, `.deterministic(seed)`, `.observe(listener)`, `.feedInto(set)`, `.buildOrderedSet()`, `.buildEnsemble()`, `.buildCoOptimized(policy)`, `.streaming(set, maxSize)`, `.adaptiveStream(set, maxSize)`, `.sortByteKeys(enc)`. Also `BeefCollectors.toOrderedSet(...)` / `toSortedList(...)` for the Streams API.
+**`BeefSort.java`** — the fluent public facade. Entry point for all users. Methods: `.source(list)`, `.keyEncoder(enc)`, `.byteSequenceEncoder(enc)`, `.policy(SelectionPolicy)`, `.selector(sel)`, `.maxAuxMemory(bytes)`, `.deterministic(seed)`, `.observe(listener)`, `.feedInto(set)`, `.buildOrderedSet()`, `.buildEnsemble()`, `.buildCoOptimized(policy)`, `.buildAdaptive(policy)`, `.buildAdaptiveEnsemble(policy)`, `.streaming(set, maxSize)`, `.adaptiveStream(set, maxSize)`, `.sortByteKeys(enc)`. Also `BeefCollectors.toOrderedSet(...)` / `toSortedList(...)` for the Streams API.
 
 **`feed/BulkBuildFeeder.java`** — O(n) feed via `OrderedSet.fromSorted` / `buildFromSorted` (a CSRBT API that builds a balanced red-black tree directly from a sorted run). Falls back to median-first `add` for non-empty or ensemble targets.
 

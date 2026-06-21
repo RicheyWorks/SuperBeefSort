@@ -249,4 +249,57 @@ class ExternalMergeSortTest {
             }
         }
     }
+
+    // ---- ADR done-metric: large-scale multi-pass ----
+
+    @Test
+    void largeScaleMultiPassMatchesReference() throws IOException {
+        // n=5000, runSize=50 → 100 runs; fanIn=3 → 5 passes (100→34→12→4→2→done)
+        List<Integer> in = random(5_000, 1_000, 99991L);
+        List<Integer> result = BeefSort.with(Comparator.<Integer>naturalOrder())
+                .source(in)
+                .external(SpillSerializer.forIntegers())
+                .runSize(50)
+                .fanIn(3)
+                .toList();
+        assertEquals(reference(in), result);
+    }
+
+    @Test
+    void largeScaleMultiPassDuplicateHeavyStability() throws IOException {
+        // 3000 records with 8 distinct keys — many ties — multi-pass (30 runs, 3 passes with fanIn=4)
+        record Tagged(int key, int idx) {}
+        List<Tagged> in = new ArrayList<>(3_000);
+        for (int i = 0; i < 3_000; i++) in.add(new Tagged(i % 8, i));
+
+        Comparator<Tagged> byKey = Comparator.comparingInt(Tagged::key);
+        List<Tagged> result = BeefSort.with(byKey)
+                .source(in)
+                .policy(SelectionPolicy.STABLE)
+                .external(new SpillSerializer<Tagged>() {
+                    @Override
+                    public void write(Tagged v, java.io.DataOutputStream out) throws IOException {
+                        out.writeInt(v.key());
+                        out.writeInt(v.idx());
+                    }
+                    @Override
+                    public Tagged read(java.io.DataInputStream inp) throws IOException {
+                        return new Tagged(inp.readInt(), inp.readInt());
+                    }
+                })
+                .runSize(100)   // 30 runs
+                .fanIn(4)       // 30→8→2 → 3 passes
+                .toList();
+
+        List<Tagged> expected = new ArrayList<>(in);
+        expected.sort(byKey);
+        assertEquals(expected, result);
+
+        for (int i = 1; i < result.size(); i++) {
+            if (result.get(i - 1).key() == result.get(i).key()) {
+                assertTrue(result.get(i - 1).idx() < result.get(i).idx(),
+                        "stability violated at position " + i);
+            }
+        }
+    }
 }

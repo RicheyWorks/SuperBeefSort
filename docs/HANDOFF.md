@@ -1,9 +1,73 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-20. Author: Richmond (with Claude). **See the "Session 2026-06-20" section below for the
-latest work (co-optimization prior, memory-aware selection, and the Phase 2/4/5 roadmap ADRs).** Status: **Phase 0 + Phase 1 complete; Phase 3
+Last updated: 2026-06-21. Author: Richmond (with Claude). **See the "Session 2026-06-21" section below for
+Phase 2 productization (Rust FFM kernel).** Status: **Phase 0 + Phase 1 complete; Phase 3
 (parallel mirror ensemble feed + O(n)/member bulk fast path) shipped; Phase 2 Rust radix kernel via Panama
-FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+FFM productized in `sbs-kernels-rust`.** Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+
+## Session 2026-06-21 — Phase 2: Rust radix kernel productized (sbs-kernels-rust)
+
+Implemented all six ADR action items from `docs/adr-phase2-rust-ffm-kernel.md`. Build verified
+green on JDK 21 (host machine). The kernel module activates when Gradle runs under JDK 22+ — no
+change needed; `settings.gradle.kts` conditionally includes it.
+
+**What was built:**
+
+- **`sbs-kernels-rust/`** — new optional Gradle module. `build.gradle.kts` specifies a JDK 22
+  toolchain; a `cargoBuild` Exec task + `copyNativeLib` Copy task build the Rust cdylib and place
+  it on the module's resource path (`native/<platform>/sbsradix.dll|so|dylib`).
+
+- **`rust/src/lib.rs`** — entropy-aware Rust kernel. `sort_keyed_flat` sorts n (key, payload)
+  pairs (interleaved u64 flat layout); `radix_plan` mirrors `RadixPlan.forWidth` exactly
+  (offset-by-min + adaptive bits-per-pass). Stable: equal-key pairs maintain forward order. 6/6
+  Rust unit tests green.
+
+- **`RustRadixBridge`** — FFM bridge (JDK 22). Extracts the cdylib from classpath resources to a
+  temp file; loads via `SymbolLookup.libraryLookup` into `Arena.global()`; exposes `sortKeyed()`.
+  All failures in the static initialiser are caught → `isAvailable()` returns false → strategy
+  not registered → pure-Java `radix.lsd` fallback.
+
+- **`RustRadixSortStrategy<K>`** (`radix.lsd.rust`) — packs (sign-flipped key, original-index)
+  pairs into a confined `Arena` MemorySegment, calls the native kernel, extracts the sorted
+  permutation, writes items back. StrategyCapabilities: stable, out-of-place, requiresIntegerKeys,
+  Runtime=RUST, LINEAR aux.
+
+- **`RustKernelStrategyProvider`** + SPI service file — registers `radix.lsd.rust` only when the
+  bridge is available.
+
+- **`StrategyRegistry.withDefaults()`** — now catches `ServiceConfigurationError` so a JDK-22
+  compiled kernel module loaded on JDK 17/21 fails silently (class-version mismatch wraps as
+  SCE).
+
+- **`DifferentialTest`** — two new test methods covering `radix.lsd.rust` across pathological
+  shapes + jqwik property; both no-op on JDK < 22 (strategy not in registry). Separate
+  `RustRadixDifferentialTest` in the kernel module's test sources uses `Assumptions` to skip
+  when the bridge is unavailable.
+
+- **`RadixNativeBenchmark`** — JMH benchmark: `radixLsd` vs `rustRadixLsd` across
+  n=[1k, 10k, 100k, 500k]. No-ops gracefully when native strategy absent.
+  Run: `./gradlew jmh -Pbench=RadixNativeBenchmark`
+  **Selector integration is deferred until these results confirm margin > FFM marshaling cost.**
+
+**Activation path (once JDK 22 is installed):**
+
+```powershell
+# Run Gradle with JDK 22 (set JAVA_HOME or use toolchain config):
+./gradlew :sbs-kernels-rust:build   # builds cdylib + compiles FFM bridge
+./gradlew build                      # kernel module included; DifferentialTest exercises Rust strategy
+./gradlew jmh -Pbench=RadixNativeBenchmark  # measure native vs Java radix
+```
+
+**Done metric status:** All structural conditions are met. On JDK 22 with `--enable-native-access`,
+`RustRadixDifferentialTest` will validate correctness across all shapes; `RadixNativeBenchmark`
+will measure the crossover size above which the native path beats `radix.lsd`.
+
+---
+
+Last updated: 2026-06-20. Author: Richmond (with Claude). **See the "Session 2026-06-20" section below for the
+latest work (co-optimization prior, memory-aware selection, and the Phase 2/4/5 roadmap ADRs).**
+
+## Session 2026-06-20 — co-optimization prior, memory-aware selection, roadmap ADRs
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
 web step-visualizer with self-contained record/replay; a bounded streaming feed; and **concept-drift-aware
 adaptive streaming** that re-selects the sort strategy mid-stream; and **profile-guided co-optimization** (the

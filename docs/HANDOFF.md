@@ -1,10 +1,38 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-21. Author: Richmond (with Claude). **See the "Session 2026-06-21b" section below for
-Phase 5 external merge sort (action items 1–4).** Status: **Phase 0 + Phase 1 complete; Phase 3
-(parallel mirror ensemble feed + O(n)/member bulk fast path) shipped; Phase 2 Rust radix kernel via Panama
-FFM productized in `sbs-kernels-rust`; Phase 5 external merge sort (run gen + k-way merge + CSRBT streaming feed) shipped.**
+Last updated: 2026-06-21. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 + Phase 3 done.
+Phase 2 Rust kernel productized; native is 2× slower than Java at n≥100k (FFM marshaling cost); selector
+integration deferred (item 7). Phase 4 gate measured: real exploitable gaps found; action item 2 closed;
+items 3-5 open. Phase 5 external merge sort + typed step-event stream done.**
 Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+
+## Session 2026-06-21c — Phase 4 gate: metering bug, real gaps, ADR item 2 closed
+
+`Phase4DecisionGate` initially reported 0.00% max regret — a false result. `JdkSortStrategy` used
+`b.comparator()` (raw, unmetered) and `b.set()` (no `recordMove()`), so its measured cost was always 0.
+The oracle always picked `jdk.timsort` (cost 0) and the regret formula special-cased `oracle_cost == 0 → 0`,
+making every workload appear optimal regardless of what the selector chose.
+
+**Fix:** `JdkSortStrategy.sort()` now uses `(x, y) -> b.compareValues(x, y)` and calls `b.recordMove()` in
+the writeback loop, matching the metering contract every other strategy follows. The gate harness gained an
+oracle-spread report (asserting ≥ 2 distinct winners and oracle_cost > 0 in all workloads).
+
+**Corrected results** (324 workloads, 6 sizes × 9 shapes × 2 key modes × 3 trials, oracle sees 4 distinct
+winners — `counting` 138, `jdk.timsort` 108, `insertion` 48, `intro` 30):
+
+| Selector | Near-optimal (< 5% regret) | Mean regret | Max regret |
+|---|---|---|---|
+| `CostModelStrategySelector` | 196/324 (60.5%) | 386.52% | 6886.6% |
+| `BanditStrategySelector` | 236/324 (72.8%) | 191.94% | 7265.4% |
+
+Worst gaps: reversed comparable-only (cost model picks `intro`; `jdk.timsort` detects the run in O(n) — up
+to 68× cheaper at n=50k); clustered integer-keyed (cost model misses `counting`). **The exploitable gap is
+real.** ADR `docs/adr-phase4-python-intelligence.md`: action item 2 marked `[x]` with corrected findings;
+items 3-5 (train, export, `LearnedModelStrategySelector`) remain open; status → In Progress.
+
+Also closed in this session: Phase 2 JMH benchmark results recorded in the ADR; Phase 2 ADR status → Done.
+
+---
 
 ## Session 2026-06-21b — Phase 5: external merge sort (sbs external/ package)
 
@@ -484,29 +512,24 @@ flags) — **4/4 green**, full run **42/42** on the bootstrapped JDK 17.
 - External / out-of-core sort not implemented. (Parallel mirror feed, bounded streaming, and
   concept-drift-adaptive streaming now are — see the streaming + drift sections above.)
 
-## Next steps (roadmap)
+## Current open items (roadmap)
 
-- **Phase 2 — Rust radix kernel via Panama FFM.** New module `sbs-kernels-rust`; off-heap `SortBuffer`
-  variant; `RadixSortStrategy` with `backingRuntime = RUST`; keep the Java radix as the capability
-  fallback. Targets JDK 22+ in that module only.
-- **Phase 3 — deeper CSRBT.** Range-sharded **parallel** feed into `EnsembleOrderedSet` (sorted runs
-  make range partitioning trivial) — **build-ready design in [`PHASE3-PARALLEL-FEED.md`](PHASE3-PARALLEL-FEED.md)**
-  (the SBS↔CSRBT contract, a lock-free `ParallelFeeder`, fallback, tests, and the assumptions to verify
-  against CSRBT first); streaming/backpressure feeder; precision feeder; surface CSRBT rotations/morphs in
-  metrics.
-- **Phase 4 — Python intelligence.** `SbsIntelligence` gRPC service: ML profiler + learned strategy
-  selection behind the existing `StrategySelector` interface.
-- **Phase 5 — observability + scale.** TypeScript step visualizer over the `SortEvent` stream;
-  distributed/external sort.
+- **Phase 2 item 7 — selector integration for `radix.lsd.rust`.** Deferred until the native path earns
+  back FFM marshaling cost. Only paths to a positive margin: **(a) rayon parallelism** in the Rust kernel
+  (sort cost spread across cores while the Java path stays single-threaded), or **(b) an off-heap
+  `SortBuffer`** that eliminates the two copy passes (kernel sorts in place, no separate marshaling step).
+  Neither is started; ADR item 7 remains `[ ]`.
 
-All three IDEAS "top picks" are now done (O(n) bulk-build, self-tuning selector, web visualizer).
-Quick wins if picking up cold: push host-side first (SBS **and** the sibling CSRBT changes, or CI stays
-red), then pick a roadmap phase — Phase 3's ensemble range-sharded parallel feed is the next natural
-CSRBT-native win; Phase 2's Rust kernel is the heaviest lift. (The true inversion-count signal and the
-visualizer's record-and-replay captures are both now done — see above.) Smaller remaining: a true
-inversion-count signal in the JS profiler to mirror the Java one in the visualizer. (Folding the inversion
-estimate into the TimSort run-count model is now done — see the galloping-discount note above and
-`docs/adr-timsort-inversion-galloping.md`.)
+- **Phase 4 items 3-5 — LearnedModelStrategySelector.** Gate measurement (item 2) found real gaps:
+  the cost model picks `intro` for reversed comparable-only inputs where `jdk.timsort` is 20-68× cheaper;
+  it misses `counting` for clustered integer keys. Next steps (all in ADR `docs/adr-phase4-python-intelligence.md`):
+  - Item 3: train a compact classifier (GBT / logistic) over the Phase4DecisionGate corpus; export thresholds/weights.
+  - Item 4: `LearnedModelStrategySelector` — loads the model in-process, wraps `CostModelStrategySelector`,
+    overrides only above a confidence margin + size gate; add to `DifferentialTest`.
+  - Item 5: benchmark vs the bandit on held-out workloads; promote past the delegate only where it wins.
+  An alternative to ML: fix the cost model's heuristics for reversed (recognize it as adaptive-TimSort territory)
+  and clustered (trust the profiler's `counting` feasibility signal more). That may close most of the gap
+  without a model.
 
 ## Repo / push status
 

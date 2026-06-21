@@ -260,23 +260,65 @@ public final class Phase4DecisionGate {
         System.out.printf("Workloads per selector: %d  (%d sizes × %d shapes × 2 key-modes × %d trials)%n%n",
                 perSelector, SIZES.length, Shape.values().length, TRIALS);
 
+        // Paranoia: verify the oracle is discriminating across workloads.
+        printOracleSpread(rows);
+
         for (String sel : List.of("cost-model", "bandit")) {
             printSelector(sel, rows.stream().filter(r -> r.selector().equals(sel)).toList());
+        }
+    }
+
+    /**
+     * Print oracle winner distribution across all workloads and verify the oracle is discriminating.
+     * If only one strategy ever wins, the harness is degenerate — "already optimal" would be
+     * trivially true and untrustworthy.
+     */
+    private static void printOracleSpread(List<Row> rows) {
+        // Collect oracle winners from cost-model rows (one oracle result per workload cell).
+        List<Row> cmRows = rows.stream().filter(r -> r.selector().equals("cost-model")).toList();
+
+        // Frequency of each oracle winner
+        Map<String, Long> freq = new java.util.TreeMap<>();
+        for (Row r : cmRows) freq.merge(r.oracle(), 1L, Long::sum);
+
+        System.out.println("Oracle winner distribution (brute-force metered min across all candidates):");
+        freq.forEach((k, v) -> System.out.printf("  %-22s %3d / %d%n", k, v, cmRows.size()));
+
+        long distinctWinners = freq.size();
+        System.out.printf("  -> %d distinct winners across %d workloads%n%n", distinctWinners, cmRows.size());
+
+        // Paranoia assertion: if only one winner, the oracle never had a real contest — something is wrong.
+        if (distinctWinners < 2) {
+            throw new AssertionError(
+                    "Oracle degenerate: only one strategy ever wins (" + freq.keySet() +
+                    "). Check that all candidate strategies are metered through the SortBuffer.");
+        }
+
+        // Count workloads where oracle_cost > 0 (the oracle made a real choice between non-trivial strategies).
+        long nonZeroCost = cmRows.stream().filter(r -> r.oracleCost() > 0).count();
+        System.out.printf("Oracle cost > 0 in %d / %d workloads " +
+                "(zero means all candidates unmetered — that is a bug)%n%n", nonZeroCost, cmRows.size());
+        if (nonZeroCost == 0) {
+            throw new AssertionError(
+                    "Oracle cost is 0 in every workload. No strategy is metering through the SortBuffer — " +
+                    "regret calculation is undefined. Fix strategy metering before trusting these results.");
         }
     }
 
     private static void printSelector(String name, List<Row> rows) {
         long total = rows.size();
         long exact = rows.stream().filter(Row::exactMatch).count();
+        long differ = total - exact; // chose a different strategy than the oracle's cheapest
         long near = rows.stream().filter(Row::nearOptimal).count();
         double meanReg = rows.stream().mapToDouble(Row::regret).average().orElse(0);
         double maxReg = rows.stream().mapToDouble(Row::regret).max().orElse(0);
         List<Row> subOpt = rows.stream().filter(r -> !r.nearOptimal()).toList();
         double meanSubReg = subOpt.stream().mapToDouble(Row::regret).average().orElse(0);
 
-        System.out.printf("%-14s  exact=%3d/%3d (%4.1f%%)  near-opt(<5%%)=%3d/%3d (%4.1f%%)" +
+        System.out.printf("%-14s  exact=%3d/%3d (%4.1f%%)  differ=%3d/%3d  near-opt(<5%%)=%3d/%3d (%4.1f%%)" +
                         "  mean_regret=%5.2f%%  mean_regret_when_subopt=%5.2f%%  max_regret=%5.1f%%%n%n",
                 name + ":", exact, total, 100.0 * exact / total,
+                differ, total,
                 near, total, 100.0 * near / total,
                 meanReg * 100, meanSubReg * 100, maxReg * 100);
 

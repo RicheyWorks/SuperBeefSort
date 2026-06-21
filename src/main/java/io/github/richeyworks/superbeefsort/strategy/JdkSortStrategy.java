@@ -11,7 +11,7 @@ import java.util.List;
 
 /**
  * Baseline that delegates to the JDK's adaptive, stable sort (TimSort). Useful as a correctness
- * oracle and a sensible fallback; its internal comparisons are not metered through the buffer.
+ * oracle and a sensible fallback.
  */
 public final class JdkSortStrategy<K> implements SortStrategy<K> {
 
@@ -25,9 +25,10 @@ public final class JdkSortStrategy<K> implements SortStrategy<K> {
         for (int i = 0; i < n; i++) {
             list.add(b.get(i));
         }
-        list.sort(b.comparator());
+        list.sort((x, y) -> b.compareValues(x, y));
         for (int i = 0; i < n; i++) {
             b.set(i, list.get(i));
+            b.recordMove();
         }
     }
 

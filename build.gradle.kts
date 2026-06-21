@@ -110,3 +110,18 @@ tasks.register<JavaExec>("phase4Gate") {
         jvmArgs("--enable-native-access=ALL-UNNAMED")
     }
 }
+
+// Phase 4 training-corpus dumper (ADR action item 3): emit {DataProfile features, oracle label,
+// per-strategy costs} CSVs over a workload grid, using the real profiler features. Feeds the offline
+// Python trainer in tools/phase4/. Writes build/reports/phase4-corpus-{train,gate}.csv.
+// Run: ./gradlew phase4Corpus   (optionally --args="<trainTrials>")
+tasks.register<JavaExec>("phase4Corpus") {
+    group = "verification"
+    description = "Dump the Phase 4 training corpus (features+label+costs) for the offline trainer."
+    mainClass.set("io.github.richeyworks.superbeefsort.demo.Phase4CorpusDump")
+    classpath = sourceSets["main"].runtimeClasspath
+    jvmArgs("-Xmx512m")
+    if (JavaVersion.current() >= JavaVersion.VERSION_22) {
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
+}

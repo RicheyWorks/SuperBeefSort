@@ -1,7 +1,8 @@
 # ADR: Phase 4 — learned strategy selection (SbsIntelligence)
 
-**Status:** In Progress (action item 2 closed — real exploitable gaps found; items 3-5 pending)
-**Date:** 2026-06-20
+**Status:** In Progress (action items 1-4 closed — corpus logged, gaps measured, model trained + exported,
+in-process `LearnedModelStrategySelector` built; item 5 in-JVM JMH pending)
+**Date:** 2026-06-20 (items 3-4 added 2026-06-21)
 **Deciders:** Richmond (project owner)
 **Related:** `docs/HANDOFF.md` (Phase 4 roadmap), `select/StrategySelector` + `select/LearningStrategySelector` (the seams), `select/BanditStrategySelector` (the in-process learned baseline), `select/CostModelStrategySelector` (the analytic baseline / prior source), `profile/DataProfile` (the feature vector), `core/SortResult` (the label)
 
@@ -184,13 +185,58 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
 
    **Real exploitable gaps exist.** Neither selector is near-optimal across the board. Items 3-5 remain open.
 
-3. [ ] **Train + export (Phase 4a).** Train a compact classifier (GBT / multinomial logistic) over the
-   feature vector; export thresholds/weights in a stable, versioned format.
-4. [ ] **`LearnedModelStrategySelector` (Java).** Loads the exported model, evaluates in-process, wraps a
-   `CostModelStrategySelector` delegate, overrides only above a confidence margin and a size gate; implements
-   `LearningStrategySelector` to keep logging. Add to the differential test.
-5. [ ] **Benchmark vs the bandit** on held-out workloads (extend the JMH/selection harness). Promote past the
-   delegate only where it measurably wins.
+3. [x] **Train + export (Phase 4a) — done (2026-06-21).** `tools/phase4/` holds the offline pipeline.
+   A faithful Python **mirror** (`sbs_mirror.py`: a bit-exact `java.util.Random`, the profiler feature
+   computation, all eight candidate strategies' **metering**, and the brute-force oracle) is validated by
+   `validate_gate.py` to reproduce the gate's exact 324-workload oracle spread
+   (`counting 138, jdk.timsort 108, insertion 48, intro 30`) — so a model trained on a mirror-generated
+   corpus is trained on real labels. `gen_corpus.py` emits a disjoint-by-size training grid + the 324 gate
+   workloads as a held-out test set; `train_selector.py` fits a depth-limited `DecisionTreeClassifier`
+   (GBT + multinomial-logistic reported as headroom) and exports **`sbs_selector_model.json`** — a stable,
+   versioned (`schema_version: 1`) flat-tree blob (feature order, class names, and
+   `feature/threshold/left/right/class/confidence` arrays) that an ML-free Java walker evaluates. The export
+   round-trips (the JSON walker matches sklearn on all 324). For serving-time **feature parity** the Java
+   `demo/Phase4CorpusDump` (`./gradlew phase4Corpus`) emits the same schema from the *real* profiler features
+   (HLL distinct, sampled inversions, distribution class) — train on that corpus for the shipped model.
+
+   **Measured on the held-out 324 gate workloads (predictions masked to feasible strategies):**
+
+   | selector | exact-match | mean regret |
+   |---|---|---|
+   | `CostModelStrategySelector` (gate baseline) | 60.5% | 386.52% |
+   | `BanditStrategySelector` (gate baseline) | 65.4% | 191.94% |
+   | **learned tree (depth 5, 23 nodes)** | **98.1%** | **0.50%** |
+
+   5-fold CV on the training grid: tree 96.0%, GBT 95.4%, logistic 92.2%. Top features: `key_span`,
+   `inversions`, `inversion_ratio`, `distinct_ratio`. The six residual misses are all one shape —
+   `sawtooth` comparable-only, oracle `jdk.timsort` (its run-detection exploits the period-8 structure) vs
+   predicted `intro` — with bounded 22–32% regret, exactly the case the selector's confidence gate defers on.
+   The decision tree (vs GBT/logistic) is chosen as the export: it already dominates the baselines and its
+   Java loader is ~15 lines with no ML dependency. *Python pipeline runs in-sandbox; the host `./gradlew
+   phase4Corpus` produces the production-parity corpus.*
+4. [x] **`LearnedModelStrategySelector` (Java) — done (2026-06-21).** `select/SelectorModel` is a
+   dependency-free loader for the flat model export (`sbs_selector_model.txt`, schema v1 — a line-oriented
+   twin of the JSON, since the engine ships no JSON parser); it parses the parallel tree arrays with
+   `String.split` and `predict(double[])` walks to a leaf. `select/LearnedModelStrategySelector` implements
+   `LearningStrategySelector`, wraps a `CostModelStrategySelector` delegate, and **overrides only when**
+   (1) policy is `SMART`, (2) `size >= sizeGate` (default 256 — tiny jobs aren't worth a consult),
+   (3) the leaf confidence `>= confidenceMargin` (default 0.65), and (4) the predicted strategy is
+   registered *and applicable* to the profile (integer-key + counting-feasibility gates) — otherwise it
+   returns the delegate's plan verbatim. Its feature mapping (`DataProfile -> double[]`) is the Java twin
+   of `tools/phase4/gen_corpus.features`, so training and serving see the same vector. `observe` just keeps
+   a learning delegate tuning. Covered by `LearnedModelStrategySelectorTest` (override→counting/intro;
+   defer below the size gate / under STABLE+FIXED / below the confidence margin / when the pick is
+   inapplicable; observe-forwarding; model parse incl. version + ragged-array rejection; a real-export
+   structural smoke test loading `sbs_selector_model.txt` from the test classpath). *No `DifferentialTest`
+   entry: a selector is not a sort — it can only return a registry-verified strategy, so it inherits the
+   differential coverage of those strategies by construction. Compile/test is the host `./gradlew build`
+   gate (sandbox is JRE 11 / no CSRBT); the loader's parse+walk logic is byte-identical to the Python
+   `walk_flat` that round-trips all 324 predictions.* No facade change needed — pass it to
+   `BeefSort.selector(...)`.
+5. [ ] **Benchmark vs the bandit** *in-JVM* (extend the JMH/selection harness); promote past the delegate only
+   where it measurably wins. The **offline** half is already answered: on the gate benchmark the learned tree
+   beats the bandit by +32.7 pts exact-match and cuts mean regret from 191.94% to 0.50% (item 3). The open
+   part is wiring the real selector (item 4) and confirming the in-process inference cost is amortized.
 6. [ ] **(Only if needed) Phase 4b:** `SbsIntelligence` gRPC service + `RemoteStrategySelector` with size gate
    + circuit breaker + local fallback, for continual/fleet-wide learning.
 

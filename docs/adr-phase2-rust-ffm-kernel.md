@@ -1,6 +1,6 @@
 # ADR: Productize the Phase 2 Rust radix kernel (Panama FFM)
 
-**Status:** Proposed
+**Status:** Done
 **Date:** 2026-06-20
 **Deciders:** Richmond (project owner)
 **Related:** `phase2-ffm/` (the proven proof-of-concept), `docs/HANDOFF.md` (Phase 2 roadmap), `docs/ARCHITECTURE.md` §5.1 (the `SortBuffer` off-heap seam), `strategy/RadixSortStrategy.java` + `strategy/RadixPlan.java` (the Java fallback), `registry/StrategyProvider` (the SPI seam), `core/StrategyCapabilities` (the `Runtime` capability)
@@ -153,21 +153,22 @@ path is integrated and measured.
 
 ## Action Items
 
-1. [ ] **Module skeleton.** Add `sbs-kernels-rust` (Gradle, Java **22** toolchain via `JavaLanguageVersion`;
+1. [x] **Module skeleton.** Add `sbs-kernels-rust` (Gradle, Java **22** toolchain via `JavaLanguageVersion`;
    the root build stays 17). Move `phase2-ffm/SbsRadixFfm.java` in as the FFM bridge class.
-2. [ ] **Native build task.** A Gradle task that runs `cargo`/`rustc` to produce the platform `cdylib` and
+2. [x] **Native build task.** A Gradle task that runs `cargo`/`rustc` to produce the platform `cdylib` and
    places it on the module's resource path; wire it before `processResources`/test.
-3. [ ] **Kernel parity.** Port `RadixPlan`'s **offset-by-min + adaptive bits-per-pass/pass-count** into
+3. [x] **Kernel parity.** Port `RadixPlan`'s **offset-by-min + adaptive bits-per-pass/pass-count** into
    `radix.rs` (today it is fixed 8-bit/pass over absolute magnitude), so the native path is competitive on
    narrow-band/high-magnitude keys.
-4. [ ] **`radix.lsd.rust` strategy + SPI.** A `SortStrategy` with `StrategyCapabilities.backingRuntime = RUST`
+4. [x] **`radix.lsd.rust` strategy + SPI.** A `SortStrategy` with `StrategyCapabilities.backingRuntime = RUST`
    and a **guarded static load** (JDK ≥ 22, `cdylib` present, native access granted) that throws/declines so
    the provider registers it only when usable; contribute it via a module-local `StrategyProvider`. The host's
    `ServiceLoader` use must **catch `ServiceConfigurationError`** so a missing/incompatible module never breaks
    discovery.
-5. [ ] **Differential coverage.** Add `radix.lsd.rust` to `DifferentialTest`'s strategy list (only when
-   registered) so it is validated against the JDK reference across all pathological + duplicate shapes.
-6. [ ] **JMH benchmark.** Native vs `radix.lsd` across sizes/distributions (extend `SortStrategyBenchmark`),
+5. [x] **Differential coverage.** Add `radix.lsd.rust` to `DifferentialTest`'s strategy list (only when
+   registered) so it is validated against the JDK reference across all pathological + duplicate shapes,
+   including negatives and `Long.MIN_VALUE`/`Long.MAX_VALUE`.
+6. [x] **JMH benchmark.** Native vs `radix.lsd` across sizes/distributions (extend `SortStrategyBenchmark`),
    to find the `n` where the native path earns back marshaling. **Do not** let the cost model/selector prefer
    it until this exists.
 7. [ ] **(Then) selector integration** — a size-gated native radix arm — and **(later) rayon parallelism**;

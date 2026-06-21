@@ -197,4 +197,30 @@ class DifferentialTest {
     Arbitrary<List<Integer>> boundedIntsForRust() {
         return Arbitraries.integers().between(-5000, 5000).list().ofMaxSize(500);
     }
+
+    @Test
+    void rustRadixMatchesReferenceOnLongExtremes() {
+        if (RUST_RADIX_STRATEGY == null) {
+            return; // kernel absent — skip
+        }
+        @SuppressWarnings("unchecked")
+        SortStrategy<Long> rustLong =
+                (SortStrategy<Long>) (Object) StrategyRegistry.withDefaults().get(RUST_RADIX_ID);
+
+        // Exercises the sign-flip XOR mapping (^ Long.MIN_VALUE) at both extremes plus duplicates.
+        List<Long> input = new ArrayList<>(List.of(
+                Long.MIN_VALUE, Long.MAX_VALUE, -1L, 0L, 1L,
+                Long.MIN_VALUE, Long.MAX_VALUE,       // duplicates to confirm stable ordering
+                Long.MIN_VALUE + 1L, Long.MAX_VALUE - 1L
+        ));
+        List<Long> expected = new ArrayList<>(input);
+        expected.sort(Comparator.naturalOrder());
+
+        KeyEncoder<Long> encoder = KeyEncoder.ofLong(x -> x);
+        SortBuffer<Long> buf = SortBuffer.of(input, Comparator.<Long>naturalOrder(), encoder);
+        rustLong.sort(buf, SortContext.noop());
+
+        assertEquals(expected, buf.toList(),
+                "radix.lsd.rust must sort Long.MIN_VALUE and Long.MAX_VALUE correctly");
+    }
 }

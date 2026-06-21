@@ -3,6 +3,7 @@ package io.github.richeyworks.superbeefsort.core;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * The mutable region a {@link SortStrategy} sorts in place. Backed by an {@code Object[]} so
@@ -26,6 +27,8 @@ public final class SortBuffer<K> {
     private long comparisons;
     private long moves;
     private long peakAuxBytes;
+    private boolean stepEventsEnabled;
+    private StepEventSink stepSink;
 
     private SortBuffer(Object[] a, Comparator<? super K> comparator,
                        KeyEncoder<K> keyEncoder, ByteSequenceEncoder<K> byteSequenceEncoder) {
@@ -58,6 +61,20 @@ public final class SortBuffer<K> {
         return new SortBuffer<>(copy, comparator, keyEncoder, null);
     }
 
+    /**
+     * Enable step-level event emission for this buffer. Must be called before the strategy sorts;
+     * events are emitted from {@link #compare}, {@link #compareToKey}, {@link #swap}, and the
+     * indexed {@link #recordMove(int, int)}. Has no effect on the zero-argument
+     * {@link #recordMove()} (which carries no index information).
+     *
+     * <p>When this method is NOT called (the default), every guarded path in the hot methods is a
+     * single predicted-not-taken branch — zero allocation, zero extra work.</p>
+     */
+    public void enableStepEvents(StepEventSink sink) {
+        this.stepSink = Objects.requireNonNull(sink, "sink");
+        this.stepEventsEnabled = true;
+    }
+
     public int size() {
         return a.length;
     }
@@ -75,17 +92,24 @@ public final class SortBuffer<K> {
     @SuppressWarnings("unchecked")
     public int compare(int i, int j) {
         comparisons++;
-        return comparator.compare((K) a[i], (K) a[j]);
+        int result = comparator.compare((K) a[i], (K) a[j]);
+        if (stepEventsEnabled) stepSink.onStep(new StepEvent.Comparison(i, j, result));
+        return result;
     }
 
     /** Compare the element at index {@code i} against an external {@code key}. */
     @SuppressWarnings("unchecked")
     public int compareToKey(int i, K key) {
         comparisons++;
-        return comparator.compare((K) a[i], key);
+        int result = comparator.compare((K) a[i], key);
+        if (stepEventsEnabled) stepSink.onStep(new StepEvent.Comparison(i, -1, result));
+        return result;
     }
 
-    /** Compare two free-standing values (used by merge sort across its two halves). */
+    /**
+     * Compare two free-standing values (used by merge sort across its two halves).
+     * No step event is emitted because neither value resides at a current buffer index.
+     */
     public int compareValues(K x, K y) {
         comparisons++;
         return comparator.compare(x, y);
@@ -96,11 +120,18 @@ public final class SortBuffer<K> {
         a[i] = a[j];
         a[j] = t;
         moves += 2;
+        if (stepEventsEnabled) stepSink.onStep(new StepEvent.Swap(i, j));
     }
 
-    /** Record a single element move (e.g. a shift in insertion or merge sort). */
+    /** Record a single element move with no index information (e.g. a merge-sort aux copy). */
     public void recordMove() {
         moves++;
+    }
+
+    /** Record a single element move and emit a {@link StepEvent.Move} when step events are enabled. */
+    public void recordMove(int from, int to) {
+        moves++;
+        if (stepEventsEnabled) stepSink.onStep(new StepEvent.Move(from, to));
     }
 
     /**

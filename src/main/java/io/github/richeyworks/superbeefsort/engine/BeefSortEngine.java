@@ -6,6 +6,7 @@ import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortEvent;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
+import io.github.richeyworks.superbeefsort.core.StepEventSink;
 import io.github.richeyworks.superbeefsort.core.SortResult;
 import io.github.richeyworks.superbeefsort.core.SortStrategy;
 import io.github.richeyworks.superbeefsort.feed.BalancedBuildFeeder;
@@ -108,6 +109,13 @@ public final class BeefSortEngine<K> {
         // Snapshot counters after profiling so metrics reflect the sort itself, not the profile pass.
         long beforeComparisons = buffer.comparisons();
         long beforeMoves = buffer.moves();
+
+        // Wire step-event sink now (after profiling) so profiler comparisons are not emitted.
+        StepEventSink stepSink = spec.stepEventSink();
+        if (stepSink != null) {
+            buffer.enableStepEvents(stepSink);
+        }
+
         long t0 = System.nanoTime();
         strategy.sort(buffer, new SortContext(obs, spec.randomSeed()));
         long elapsed = System.nanoTime() - t0;

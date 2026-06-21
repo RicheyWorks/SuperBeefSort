@@ -9,6 +9,7 @@ import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortObserver;
+import io.github.richeyworks.superbeefsort.core.StepEventSink;
 import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleAdaptation;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleSpec;
@@ -76,6 +77,7 @@ public final class BeefSort<K> {
     private AccessPolicy accessPolicy = AccessPolicy.BALANCED; // drives StrategyAdvisor for build*()
     private Supplier<? extends TreeStrategy<K>> targetStrategy; // null -> StrategyAdvisor decides
     private HealthPolicy healthPolicy = HealthPolicy.defaults(); // streaming batch size + self-heal cadence
+    private StepEventSink stepEventSink; // null -> step events disabled (default)
 
     private BeefSort(Comparator<? super K> comparator) {
         this.comparator = comparator;
@@ -165,6 +167,17 @@ public final class BeefSort<K> {
     /** Health/backpressure policy for the streaming feeder (batch size + self-heal cadence). */
     public BeefSort<K> withHealthPolicy(HealthPolicy policy) {
         this.healthPolicy = (policy == null) ? HealthPolicy.defaults() : policy;
+        return this;
+    }
+
+    /**
+     * Enable per-step event recording: every comparison, swap, and indexed element move during
+     * the sort is sent to {@code sink} as a {@link io.github.richeyworks.superbeefsort.core.StepEvent}.
+     * When this method is NOT called (the default), the buffer emits nothing — zero allocation and
+     * zero extra work on the hot path.
+     */
+    public BeefSort<K> stepEvents(StepEventSink sink) {
+        this.stepEventSink = sink;
         return this;
     }
 
@@ -381,6 +394,9 @@ public final class BeefSort<K> {
         }
         if (randomSeed.isPresent()) {
             s = s.withRandomSeed(randomSeed.getAsLong());
+        }
+        if (stepEventSink != null) {
+            s = s.withStepEvents(stepEventSink);
         }
         return s;
     }

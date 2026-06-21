@@ -19,7 +19,7 @@ public final class InsertionSortStrategy<K> implements SortStrategy<K> {
             int j = i - 1;
             while (j >= 0 && b.compareToKey(j, key) > 0) {
                 b.set(j + 1, b.get(j));
-                b.recordMove();
+                b.recordMove(j, j + 1);
                 j--;
             }
             b.set(j + 1, key);

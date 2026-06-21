@@ -97,3 +97,16 @@ tasks.register<JavaExec>("moveCurve") {
     classpath = sourceSets["main"].runtimeClasspath
     jvmArgs("-Xmx2g")
 }
+
+// Phase 4 decision gate (ADR action item 2): measure selector optimality vs brute-force oracle
+// across sizes / shapes / key modes. Writes build/reports/phase4-gate.csv. Run: ./gradlew phase4Gate
+tasks.register<JavaExec>("phase4Gate") {
+    group = "verification"
+    description = "Phase 4 decision gate: selector optimality vs oracle. Writes build/reports/phase4-gate.csv."
+    mainClass.set("io.github.richeyworks.superbeefsort.demo.Phase4DecisionGate")
+    classpath = sourceSets["main"].runtimeClasspath
+    jvmArgs("-Xmx512m")
+    if (JavaVersion.current() >= JavaVersion.VERSION_22) {
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
+}

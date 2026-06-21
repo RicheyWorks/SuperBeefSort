@@ -177,3 +177,29 @@ path is integrated and measured.
 **Done-well metric:** on a 22+ JVM with the kernel present, `radix.lsd.rust` matches the JDK reference on
 every shape **and** beats `radix.lsd` in JMH wall-clock above the measured size threshold; on a 17 JVM or
 without the native lib, selection is byte-for-byte the Java path it is today.
+
+---
+
+## Benchmark Results (2026-06-21, JDK 22.0.2, Windows 11, random integers in [0, 2n))
+
+`RadixNativeBenchmark` — 1 fork, 3 warmup + 5 measurement iterations (10 s each), `Mode.AverageTime`.
+
+| n | `radix.lsd` Java (µs/op) | `radix.lsd.rust` (µs/op) | Rust overhead |
+|---|---|---|---|
+| 1,000 | 10.7 ± 2.0 | 11.8 ± 0.9 | **+10%** |
+| 10,000 | 97.6 ± 7.4 | 115.4 ± 4.1 | **+18%** |
+| 100,000 | 1,021 ± 9 | 2,184 ± 326 | **+114%** |
+| 500,000 | 7,422 ± 145 | 15,340 ± 5,544 | **+107%** |
+
+**Verdict: the native path is slower at every tested size.** The FFM marshaling cost — confined `Arena`
+allocation (16n bytes off-heap), two O(n) write passes (key + index interleaved), and an O(n) permutation
+writeback — adds roughly one full sort's worth of work and does not amortize with n. At n=100k–500k the Rust
+kernel is ≈ 2× slower than the entropy-aware Java path. The large confidence interval at n=500k (±5.5 ms)
+indicates variability in off-heap allocation and/or GC interference during the writeback.
+
+**Item 7 (selector integration) remains deferred.** There is no n above which `radix.lsd.rust` earns back
+the marshaling cost with the current single-threaded kernel and JVM-managed `Arena`. The likely path to a
+positive margin is **(a) rayon parallelism** in the kernel (distributes the sort cost across cores, where the
+Java path stays single-threaded) and **(b) an off-heap `SortBuffer`** that eliminates the two copy passes
+(the kernel would sort in place, with no separate marshaling step). Both are explicitly deferred per this ADR.
+Until one of those lands and benchmarks above the Java path, `radix.lsd.rust` ships as explicit-opt-in only.

@@ -46,9 +46,12 @@ dependencies {
         "jmhRuntimeOnly"(project(":sbs-kernels-rust"))
         // Elevate testRuntimeClasspath to JVM 22 so Gradle's attribute matching accepts the
         // kernel module (which requires JVM 22). All existing JVM-17 deps are upward compatible.
-        configurations.named("testRuntimeClasspath") {
-            attributes {
-                attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 22)
+        // Same attribute fix for both test and JMH classpaths.
+        listOf("testRuntimeClasspath", "jmhRuntimeClasspath").forEach { cp ->
+            configurations.named(cp) {
+                attributes {
+                    attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 22)
+                }
             }
         }
     }

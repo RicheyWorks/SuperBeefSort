@@ -1,8 +1,11 @@
 package io.github.richeyworks.superbeefsort;
 
+import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortBuffer;
 import io.github.richeyworks.superbeefsort.core.SortContext;
 import io.github.richeyworks.superbeefsort.core.SortStrategy;
+import io.github.richeyworks.superbeefsort.core.StrategyId;
+import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
 import io.github.richeyworks.superbeefsort.strategy.HeapSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InPlaceMergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.InsertionSortStrategy;
@@ -141,5 +144,57 @@ class DifferentialTest {
             a.add(rng.nextInt(Math.max(1, n)) - n / 2);
         }
         return a;
+    }
+
+    // ── radix.lsd.rust differential coverage (only when the kernel module is present) ──────
+
+    private static final StrategyId RUST_RADIX_ID = StrategyId.of("radix.lsd.rust");
+    private static final SortStrategy<Integer> RUST_RADIX_STRATEGY = lookupRustRadix();
+
+    private static SortStrategy<Integer> lookupRustRadix() {
+        StrategyRegistry registry = StrategyRegistry.withDefaults();
+        if (!registry.contains(RUST_RADIX_ID)) {
+            return null;
+        }
+        return registry.get(RUST_RADIX_ID);
+    }
+
+    private static void assertRustRadixMatchesReference(List<Integer> input, String shape) {
+        if (RUST_RADIX_STRATEGY == null) {
+            return; // kernel module not on classpath or native lib absent — skip
+        }
+        List<Integer> expected = new ArrayList<>(input);
+        expected.sort(Comparator.naturalOrder());
+        KeyEncoder<Integer> encoder = KeyEncoder.ofInt(i -> i);
+        SortBuffer<Integer> buf = SortBuffer.of(input, Comparator.<Integer>naturalOrder(), encoder);
+        RUST_RADIX_STRATEGY.sort(buf, SortContext.noop());
+        assertEquals(expected, buf.toList(),
+                "radix.lsd.rust disagreed on shape=" + shape + " n=" + input.size());
+    }
+
+    @Test
+    void rustRadixMatchesReferenceOnPathologicalShapes() {
+        if (RUST_RADIX_STRATEGY == null) {
+            return;
+        }
+        for (int n : new int[] {0, 1, 2, 3, 16, 17, 64, 257, 500, 2000}) {
+            assertRustRadixMatchesReference(sorted(n),           "sorted");
+            assertRustRadixMatchesReference(reversed(n),         "reversed");
+            assertRustRadixMatchesReference(allEqual(n),         "all-equal");
+            assertRustRadixMatchesReference(sawtooth(n, 8),      "sawtooth");
+            assertRustRadixMatchesReference(organPipe(n),        "organ-pipe");
+            assertRustRadixMatchesReference(fewDistinct(n, 4),   "few-distinct");
+            assertRustRadixMatchesReference(random(n, 99L + n),  "random");
+        }
+    }
+
+    @Property(tries = 300)
+    void rustRadixMatchesReferenceOnRandomInput(@ForAll("boundedIntsForRust") List<Integer> input) {
+        assertRustRadixMatchesReference(input, "property-random");
+    }
+
+    @Provide
+    Arbitrary<List<Integer>> boundedIntsForRust() {
+        return Arbitraries.integers().between(-5000, 5000).list().ofMaxSize(500);
     }
 }

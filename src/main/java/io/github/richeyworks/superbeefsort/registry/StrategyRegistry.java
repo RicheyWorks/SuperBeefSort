@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.Set;
 
@@ -41,12 +42,29 @@ public final class StrategyRegistry {
         return Collections.unmodifiableSet(byId.keySet());
     }
 
-    /** Build a registry from every {@link StrategyProvider} service on the classpath. */
+    /**
+     * Build a registry from every {@link StrategyProvider} service on the classpath.
+     *
+     * <p>Optional providers compiled for a newer JVM (e.g. the {@code sbs-kernels-rust} module
+     * targeting JDK 22) degrade silently on older runtimes: the {@link ServiceLoader} iterator
+     * wraps class-loading failures in a {@link ServiceConfigurationError}, which this method
+     * catches so that one incompatible module never breaks discovery of the remaining providers.</p>
+     */
     public static StrategyRegistry withDefaults() {
         StrategyRegistry registry = new StrategyRegistry();
-        for (StrategyProvider provider : ServiceLoader.load(StrategyProvider.class)) {
-            for (SortStrategy<?> s : provider.strategies()) {
-                registry.register(s);
+        var iter = ServiceLoader.load(StrategyProvider.class).iterator();
+        while (true) {
+            try {
+                if (!iter.hasNext()) {
+                    break;
+                }
+                StrategyProvider provider = iter.next();
+                for (SortStrategy<?> s : provider.strategies()) {
+                    registry.register(s);
+                }
+            } catch (ServiceConfigurationError ignored) {
+                // Provider incompatible with this JVM (wrong class-file version, missing cdylib,
+                // etc.) — skip it and continue with the remaining providers.
             }
         }
         // Fallback when SPI metadata is not on the classpath (e.g. exploded classes without resources).

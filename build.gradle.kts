@@ -35,6 +35,14 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.jqwik) // property tests with shrinking, same stack as CSRBT
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    // sbs-kernels-rust is optional: only add it when the JVM running Gradle is 22+, because
+    // that module is compiled for JDK 22 and won't load on older runtimes. When present, the
+    // StrategyRegistry discovers radix.lsd.rust via ServiceLoader + ServiceConfigurationError guard.
+    if (JavaVersion.current() >= JavaVersion.VERSION_22) {
+        testRuntimeOnly(project(":sbs-kernels-rust"))
+        "jmhRuntimeOnly"(project(":sbs-kernels-rust"))
+    }
 }
 
 tasks.test {
@@ -51,9 +59,15 @@ jmh {
     resultsFile = layout.buildDirectory.file("reports/jmh/results.json")
     // Optional filter so you can run a subset instead of the whole suite (~40 min). Examples:
     //   ./gradlew jmh -Pbench=SortStrategyBenchmark   (just the sort strategies)
+    //   ./gradlew jmh -Pbench=RadixNativeBenchmark    (native vs Java radix across sizes)
     //   ./gradlew jmh -Pbench=wikiSort                (just the WikiSort method, across shapes)
     if (project.hasProperty("bench")) {
         includes.set(listOf(project.property("bench").toString()))
+    }
+    // Panama FFM requires native-access permission. On JDK 22+ with the kernel module this
+    // enables radix.lsd.rust benchmarks; safe no-op on older JVMs (no native strategy registered).
+    if (JavaVersion.current() >= JavaVersion.VERSION_22) {
+        jvmArgs.add("--enable-native-access=ALL-UNNAMED")
     }
 }
 

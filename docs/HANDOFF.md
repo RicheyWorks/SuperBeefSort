@@ -1,6 +1,7 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-16. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 complete; Phase 3
+Last updated: 2026-06-20. Author: Richmond (with Claude). **See the "Session 2026-06-20" section below for the
+latest work (co-optimization prior, memory-aware selection, and the Phase 2/4/5 roadmap ADRs).** Status: **Phase 0 + Phase 1 complete; Phase 3
 (parallel mirror ensemble feed + O(n)/member bulk fast path) shipped; Phase 2 Rust radix kernel via Panama
 FFM proven as a PoC.** Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
 differential + anti-quicksort chaos tests, cost-model & self-tuning (bandit) selectors, a JMH suite, CI, and a
@@ -12,6 +13,42 @@ suites are **42/42 green** the same way (`ConceptDriftTest`, `CoOptimizationTest
 host-side for the full count. See
 the [CSRBT integration architecture](architecture-csrbt-integration.md) for how the feeders should use CSRBT
 at full strength next.
+
+## Session 2026-06-20 — co-optimization prior, memory-aware selection, roadmap ADRs
+
+Shipped this session (committed locally; the sandbox runs **JRE 11 without CSRBT**, so each was verified by
+review + Python/Node equivalence checks — run `./gradlew build` host-side as the gate, then push). See
+`PROGRESS.md` for the full per-feature detail.
+
+- **Gap 5 — run-derived co-optimization prior.** `ProfileGuidedScorer.derivePrior(SortResult, DataProfile)`
+  sets the prior *strength* from the realized run (a `cleanliness` + `certainty` blend over a `[0.05, 0.25]`
+  band centered on the old fixed `0.15`); wired through `BeefSort.buildCoOptimized`. Closes the last
+  CSRBT-integration gap (`docs/adr-csrbt-integration-deepening.md`). Test: `ProfileGuidedPriorTest`.
+- **Ensemble co-optimization prior.** `BeefSort.buildCoOptimizedEnsemble(...)` + a run-derived 5-arg
+  `EnsembleAdaptation.attachProfileGuided(...)`. Test: `EnsembleCoOptimizationTest`.
+- **Soft graded aux-memory penalty.** `CostModelStrategySelector.withAuxPenalty(λ)` / `(budget, weight)` ctor
+  — a `λ·auxBytes` term on the SMART objective, default `0` = byte-identical. Cases in `CostModelSelectorTest`.
+- **Inversion-aware TimSort cost.** A galloping discount on the merge levels, gated on
+  `min(sortedness, 1 - inversionRatio)` *and* a measured inversion count (byte-identical when unmeasured);
+  mirrored in the visualizer's JS bandit prior. `docs/adr-timsort-inversion-galloping.md`; cases in
+  `CostModelSelectorTest`.
+
+Design ADRs written this session (design only — implementation is host-side, needs toolchains the sandbox
+lacks). All three open roadmap phases now have one:
+
+- **Phase 2** — `docs/adr-phase2-rust-ffm-kernel.md`: productize the proven `phase2-ffm/` FFM Rust radix kernel
+  as an optional `sbs-kernels-rust` SPI module (JDK 22 toolchain, root stays 17), with a pure-Java fallback;
+  bring the kernel to parity with the entropy-aware `RadixPlan`; benchmark before defaulting.
+- **Phase 4** — `docs/adr-phase4-python-intelligence.md`: learned selection behind `StrategySelector`, reusing
+  the `observe(...)` stream as the training corpus; lead with offline-train / in-process-infer, gRPC
+  `SbsIntelligence` only if continual/fleet learning is needed.
+- **Phase 5** — `docs/adr-phase5-observability-scale.md`: external merge sort (run generation reuses the
+  in-memory engine; stable k-way merge; memory-budgeted) + a typed, opt-in step-level `SortEvent` stream.
+
+**Repo status after this session:** local `main` is ~23 commits ahead of `origin` (nothing pushed yet — push
+is host-side). The smallest remaining shippable code item is the Phase 4 ADR's action item #1 (log the
+`observe` corpus, pure Java); everything else pending is a roadmap-ADR action item requiring host-side
+toolchains (Rust/JDK 22, a Python service, spill I/O).
 
 ## TL;DR
 

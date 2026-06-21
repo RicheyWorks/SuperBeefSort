@@ -19,6 +19,9 @@ import io.github.richeyworks.superbeefsort.csrbt.WorkloadAdaptation;
 import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
 import io.github.richeyworks.superbeefsort.engine.JobSpec;
 import io.github.richeyworks.superbeefsort.engine.SortRunResult;
+import io.github.richeyworks.superbeefsort.external.ExternalMergeSorter;
+import io.github.richeyworks.superbeefsort.external.ExternalSortResult;
+import io.github.richeyworks.superbeefsort.external.SpillSerializer;
 import io.github.richeyworks.superbeefsort.feed.CsrbtTarget;
 import io.github.richeyworks.superbeefsort.feed.FeedMode;
 import io.github.richeyworks.superbeefsort.feed.FeedResult;
@@ -32,9 +35,11 @@ import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.stream.AdaptiveStreamSorter;
 import io.github.richeyworks.superbeefsort.stream.DriftDetector;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.function.Supplier;
 
@@ -378,5 +383,103 @@ public final class BeefSort<K> {
             s = s.withRandomSeed(randomSeed.getAsLong());
         }
         return s;
+    }
+
+    // ---- external merge sort ----
+
+    /**
+     * Begin configuring an external merge sort that handles inputs larger than available RAM: the
+     * in-memory engine sorts fixed-size chunks (profile → select → sort), spills sorted runs to
+     * temp files, and a tournament-tree k-way merge produces a globally sorted stream. Temp files
+     * are registered for deletion-on-JVM-exit and are explicitly deleted once consumed.
+     *
+     * <p>Example — sort 10M longs that don't fit in the default heap:
+     * <pre>{@code
+     * List<Long> sorted = BeefSort.with(Comparator.<Long>naturalOrder())
+     *         .keyEncoder(KeyEncoder.ofLong(x -> x))
+     *         .source(bigList)
+     *         .external(SpillSerializer.forLongs())
+     *         .runSize(500_000)
+     *         .fanIn(16)
+     *         .toList();
+     * }</pre>
+     *
+     * @param serializer Compact element serializer for the spill files. Use
+     *                   {@link SpillSerializer#forLongs()}, {@link SpillSerializer#forIntegers()},
+     *                   or {@link SpillSerializer#forStrings()} for the common types; supply a
+     *                   custom one for other element types.
+     * @throws IllegalStateException if {@link #source(List)} has not been called.
+     */
+    public ExternalSortBuilder external(SpillSerializer<K> serializer) {
+        if (source == null) {
+            throw new IllegalStateException("source not set — call source(list) before external()");
+        }
+        return new ExternalSortBuilder(Objects.requireNonNull(serializer, "serializer"));
+    }
+
+    /**
+     * Fluent configuration for an external merge sort over this builder's source, comparator,
+     * selector, and policy. Chain {@link #runSize} / {@link #fanIn} then call a terminal method.
+     */
+    public final class ExternalSortBuilder {
+
+        private final SpillSerializer<K> serializer;
+        private int runSize = 100_000;
+        private int fanIn = 16;
+
+        private ExternalSortBuilder(SpillSerializer<K> serializer) {
+            this.serializer = serializer;
+        }
+
+        /**
+         * Max number of elements per in-memory chunk (sorted run). Smaller values reduce heap
+         * pressure per chunk at the cost of more runs and potentially more merge passes; larger
+         * values sort fewer, larger runs. Default 100 000.
+         */
+        public ExternalSortBuilder runSize(int n) {
+            if (n <= 0) throw new IllegalArgumentException("runSize must be positive: " + n);
+            this.runSize = n;
+            return this;
+        }
+
+        /**
+         * Maximum number of sorted runs to merge in a single pass (the "fan-in" of the
+         * tournament tree). When the run count exceeds this, the sorter does multiple passes until
+         * ≤ {@code fanIn} runs remain. Default 16.
+         */
+        public ExternalSortBuilder fanIn(int k) {
+            if (k < 2) throw new IllegalArgumentException("fanIn must be >= 2: " + k);
+            this.fanIn = k;
+            return this;
+        }
+
+        /**
+         * Sort the source and return all results in an in-memory list. Suitable for testing and
+         * cases where the final merged output fits in RAM; for truly out-of-core use
+         * {@link #feedInto} to stream directly from the tournament tree into CSRBT.
+         */
+        public List<K> toList() throws IOException {
+            return sorter().sortToList(source);
+        }
+
+        /**
+         * Sort the source and stream-feed the merged output into {@code set} without
+         * materialising the full output in memory — the true out-of-core path.
+         */
+        public ExternalSortResult feedInto(OrderedSet<K> set) throws IOException {
+            return sorter().sortAndFeed(source, CsrbtTarget.of(set), 0);
+        }
+
+        /**
+         * As {@link #feedInto(OrderedSet)} but bounded to {@code maxSize} — the same sliding-window
+         * / top-N semantics as {@link BeefSort#streaming(OrderedSet, int)} (0 = unbounded).
+         */
+        public ExternalSortResult feedInto(OrderedSet<K> set, int maxSize) throws IOException {
+            return sorter().sortAndFeed(source, CsrbtTarget.of(set), maxSize);
+        }
+
+        private ExternalMergeSorter<K> sorter() {
+            return new ExternalMergeSorter<>(engine(), comparator, serializer, runSize, fanIn, spec());
+        }
     }
 }

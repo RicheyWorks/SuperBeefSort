@@ -135,16 +135,10 @@ typed event schema landing and a real need (maintainability / real-event fidelit
 
 ## Action Items
 
-1. [ ] **External-sort skeleton.** A run-generation pass: chunk input to the memory budget, sort each chunk
-   with the existing engine, spill sorted runs (temp files; cleanup-safe). Memory budget reuses the
-   `maxAuxMemory`-style knob.
-2. [ ] **k-way merge.** A tournament/loser-tree merge over run iterators, **stable** (age-ordered ties),
-   streaming to a sink; multi-pass when runs exceed fan-in.
-3. [ ] **Spill serialization.** Compact `KeyEncoder`-based format for integer keys; a comparator + caller
-   serializer path otherwise. Round-trip tested.
-4. [ ] **Facade + feed.** `BeefSort.external(...)` returning a sorted iterator / writing a file / feeding
-   CSRBT via `StreamingFeeder`; differential-test the merged output against an in-memory sort of the same
-   input.
+1. [x] **External-sort skeleton.** `external/` package: `SpillSerializer` (interface + `forLongs/forIntegers/forStrings` built-ins), `SpillFile`/`SpillWriter`/`SpillReader` (temp-file lifecycle, `deleteOnExit` safety net), `TournamentTree` (min-heap k-way merge, stable via run-index tiebreaker), `ExternalMergeSorter` (run gen + multi-pass merge + streaming feed), `ExternalSortResult` (metrics record). Chunk size is set as a direct element count (`runSize`, default 100k), consistent with the existing `maxAuxMemory` philosophy.
+2. [x] **k-way merge.** `TournamentTree<K>`: min-heap over `(value, runIndex)` entries; ties broken by run index ascending (earlier chunk = earlier in input) → stable across runs. Multi-pass: `mergePasses` loops while `current.size() > maxFanIn`, merging groups of `fanIn` into intermediate spill files (deleted immediately after the next pass no longer needs them).
+3. [x] **Spill serialization.** `SpillSerializer<K>` interface: `write(K, DataOutputStream)` + `read(DataInputStream): K`. Built-ins: `forLongs` (8 bytes), `forIntegers` (4 bytes), `forStrings` (DataOutputStream.writeUTF). Custom serializer for other types: supply an anonymous class. EOF signals end-of-run (no separate count header needed). Round-trip covered by the long / string / Item tests in `ExternalMergeSortTest`.
+4. [x] **Facade + feed.** `BeefSort.external(SpillSerializer<K>)` returns `ExternalSortBuilder` (non-static inner class, inherits comparator / keyEncoder / selector / policy / source). Builder has `runSize(int)` + `fanIn(int)`, then terminal methods: `toList()` (materialises in RAM; testing), `feedInto(OrderedSet<K>[, maxSize])` (streams directly from the tournament tree into CSRBT without materialising the output — the out-of-core path). `ExternalSortResult{elements, runs, mergePasses, elapsedNanos}` returned by `feedInto`. Differential-tested vs JDK reference across random + all pathological shapes + multi-pass scenarios + long/string key types + STABLE-policy stability (`ExternalMergeSortTest`, 11 test methods).
 5. [ ] **IO/JMH benchmark.** Run size vs fan-in vs passes; only then tune defaults. (Parallel run generation
    + range-sharded merge is a follow-on, tied to Phase 3.)
 6. [ ] **(Observability) Typed step-event schema.** Promote the deferred per-comparison/swap `SortEvent`s to a

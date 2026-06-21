@@ -1,9 +1,65 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-21. Author: Richmond (with Claude). **See the "Session 2026-06-21" section below for
-Phase 2 productization (Rust FFM kernel).** Status: **Phase 0 + Phase 1 complete; Phase 3
+Last updated: 2026-06-21. Author: Richmond (with Claude). **See the "Session 2026-06-21b" section below for
+Phase 5 external merge sort (action items 1–4).** Status: **Phase 0 + Phase 1 complete; Phase 3
 (parallel mirror ensemble feed + O(n)/member bulk fast path) shipped; Phase 2 Rust radix kernel via Panama
-FFM productized in `sbs-kernels-rust`.** Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+FFM productized in `sbs-kernels-rust`; Phase 5 external merge sort (run gen + k-way merge + CSRBT streaming feed) shipped.**
+Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+
+## Session 2026-06-21b — Phase 5: external merge sort (sbs external/ package)
+
+Implemented ADR action items 1–4 from `docs/adr-phase5-observability-scale.md`. Host-side
+`./gradlew build` is the compile/test gate (sandbox is JDK 11 without CSRBT; verified by static review +
+tracing).
+
+**What was built (`src/main/java/…/external/`):**
+
+- **`SpillSerializer<K>`** (public interface) — `write(K, DataOutputStream)` + `read(DataInputStream): K`; built-in
+  static factories `forLongs()` / `forIntegers()` / `forStrings()`; callers supply an anonymous implementation
+  for custom types. EOF signals end-of-run (no header/count needed: the writers close cleanly).
+
+- **`SpillFile<K>` / `SpillWriter<K>` / `SpillReader<K>`** (package-private) — temp-file lifecycle: created via
+  `SpillFile.create(ser)`, registered with `deleteOnExit` as a crash-cleanup safety net; explicitly deleted via
+  `delete()` as soon as the file is no longer needed. `SpillWriter` wraps `DataOutputStream(BufferedOutputStream)`;
+  `SpillReader` wraps `DataInputStream(BufferedInputStream)` with a peek-ahead `buffered` field and EOF detection.
+
+- **`TournamentTree<K>`** (package-private) — min-heap over `Entry<K>(K value, int runIndex)` entries; ties broken
+  by run index ascending (earlier chunk precedes later-chunk equals → stable between runs). Each `next()` poll
+  pulls the minimum, then refills from the same run's reader. `closeAll()` closes all readers.
+
+- **`ExternalMergeSorter<K>`** (public) — orchestrates run generation + multi-pass merge:
+  - *Run generation*: iterates `input` in `runSize`-element windows, sorts each with the full in-memory engine
+    (profile → select → sort — every chunk benefits from profiling and intelligent selection), spills the sorted
+    chunk to a `SpillFile`.
+  - *Multi-pass merge*: `mergePasses` loops while `current.size() > maxFanIn`, grouping runs into fan-in-sized
+    batches and merging each group via a `TournamentTree` into an intermediate `SpillFile`; intermediate files are
+    deleted immediately after the next pass. Terminates when ≤ `maxFanIn` final runs remain.
+  - *Output*: `sortToList` materialises in RAM (for testing); `sortAndFeed` streams directly from the final
+    `TournamentTree` into a `CsrbtTarget` without materialising — the out-of-core path.
+
+- **`ExternalSortResult`** (public record) — `{elements, runs, mergePasses, elapsedNanos}` returned by `feedInto`.
+
+- **`BeefSort.external(SpillSerializer<K>)`** — entry point; returns `ExternalSortBuilder` (non-static inner class;
+  inherits `comparator`, `keyEncoder`, `selector`, `policy`, `source`). Builder chainable: `runSize(int)` (default
+  100k) + `fanIn(int)` (default 16). Terminal methods: `toList()`, `feedInto(OrderedSet<K>)`,
+  `feedInto(OrderedSet<K>, int maxSize)`.
+
+**Stability:** outer sort is stable when `SelectionPolicy.STABLE` is used for each chunk sort — merge sort is
+stable, and the tournament tree's run-index tiebreaker preserves the chunk order for inter-run equal elements.
+Under `SMART`, within-chunk stability depends on the chosen strategy (e.g. introsort is not stable); callers who
+need a globally stable external sort should set `.policy(SelectionPolicy.STABLE)`.
+
+**Test (`ExternalMergeSortTest`, 11 tests):** empty input, single element, single run, multiple runs single-pass,
+multiple passes (runSize=5 fanIn=4 on n=100 → 3 passes), all pathological shapes (sorted/reversed/all-equal/
+sawtooth/few-distinct at various n with runSize=10), random battery (20 seeds × varying n/range/runSize), Long
+serializer (including MIN/MAX values), String serializer, `ExternalSortResult` metrics (5 runs, 1 pass), feed-into-
+OrderedSet correctness (min/max/size match), stability (STABLE policy + multi-pass + custom Item serializer).
+
+**ADR status:** action items 1–4 done. Remaining open items:
+- Item 5: IO/JMH benchmark (run size vs fan-in vs passes; only then tune defaults)
+- Items 6–7: typed step-event schema (opt-in per-comparison/swap SortEvent stream) + conditional TS visualizer
+
+---
 
 ## Session 2026-06-21 — Phase 2: Rust radix kernel productized (sbs-kernels-rust)
 

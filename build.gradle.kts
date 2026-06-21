@@ -1,3 +1,5 @@
+import org.gradle.api.attributes.java.TargetJvmVersion
+
 plugins {
     `java-library`
     application
@@ -42,11 +44,22 @@ dependencies {
     if (JavaVersion.current() >= JavaVersion.VERSION_22) {
         testRuntimeOnly(project(":sbs-kernels-rust"))
         "jmhRuntimeOnly"(project(":sbs-kernels-rust"))
+        // Elevate testRuntimeClasspath to JVM 22 so Gradle's attribute matching accepts the
+        // kernel module (which requires JVM 22). All existing JVM-17 deps are upward compatible.
+        configurations.named("testRuntimeClasspath") {
+            attributes {
+                attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 22)
+            }
+        }
     }
 }
 
 tasks.test {
     useJUnitPlatform() // picks up both the Jupiter and jqwik engines
+    // Panama FFM native access for RustRadixDifferentialTest on JDK 22+
+    if (JavaVersion.current() >= JavaVersion.VERSION_22) {
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
 }
 
 // JMH rig (mirrors CSRBT's config). Benchmarks live in src/jmh/java. Run: ./gradlew jmh

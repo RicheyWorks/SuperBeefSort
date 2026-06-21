@@ -150,9 +150,12 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
 
 ## Action Items
 
-1. [ ] **Log the training corpus.** A `LearningStrategySelector` decorator (or an `observe` sink) that
-   appends `{DataProfile features, StrategyId, SortResult}` rows to a file/dataset. Purely additive; ship this
-   first — it's the prerequisite for *any* model and a measurement tool on its own.
+1. [x] **Log the training corpus — done.** `select/ObservingStrategySelector` (a `LearningStrategySelector`
+   decorator) + `select/ObservationSink` append `{DataProfile features, StrategyId, SortResult}` rows via a
+   stable, versionable CSV schema (`csvHeader()` / `csvRow(...)` / a thread-safe `csvSink(Appendable)`).
+   Selection is the wrapped delegate's verbatim and a learning delegate still learns, so it harvests a labeled
+   dataset without changing behaviour. Covered by `ObservingStrategySelectorTest`. (Pure Java; host-side
+   `./gradlew build` is the gate.)
 2. [ ] **Offline analysis (Python).** Quantify how often the cost-model/bandit pick differs from the measured
    cheapest on the corpus. **If the gap is small, stop here** — Phase 4 isn't worth more than the logger.
 3. [ ] **Train + export (Phase 4a).** Train a compact classifier (GBT / multinomial logistic) over the

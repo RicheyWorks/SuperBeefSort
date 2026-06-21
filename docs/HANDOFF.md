@@ -45,10 +45,11 @@ lacks). All three open roadmap phases now have one:
 - **Phase 5** — `docs/adr-phase5-observability-scale.md`: external merge sort (run generation reuses the
   in-memory engine; stable k-way merge; memory-budgeted) + a typed, opt-in step-level `SortEvent` stream.
 
-**Repo status after this session:** local `main` is ~23 commits ahead of `origin` (nothing pushed yet — push
-is host-side). The smallest remaining shippable code item is the Phase 4 ADR's action item #1 (log the
-`observe` corpus, pure Java); everything else pending is a roadmap-ADR action item requiring host-side
-toolchains (Rust/JDK 22, a Python service, spill I/O).
+**Repo status after this session:** local `main` is ~24 commits ahead of `origin` (nothing pushed yet — push
+is host-side). The Phase 4 ADR's action item #1 (log the `observe` corpus) is now **done** —
+`select/ObservingStrategySelector` + `ObservationSink` (pure Java, `ObservingStrategySelectorTest`). Everything
+else pending is a roadmap-ADR action item requiring host-side toolchains (Rust/JDK 22, a Python service,
+spill I/O), so this is a clean stopping point.
 
 ## TL;DR
 

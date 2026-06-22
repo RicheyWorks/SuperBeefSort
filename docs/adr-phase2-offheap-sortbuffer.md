@@ -1,9 +1,12 @@
 # ADR: Phase 2 — off-heap MemorySegment buffer for the Rust radix path
 
-**Status:** Experiment complete (2026-06-21). Off-heap removes the FFM marshaling penalty (parity at
-n=100k, where the old pair-path was ~2.1× slower) but single-threaded native radix still loses to a tight
-Java radix at scale (0.64× at n=1M) — **gate not met, not integrated**. Off-heap is kept as the validated
-substrate for the next lever (rayon parallelism, branch B).
+**Status:** CLOSED NEGATIVE (2026-06-21). Off-heap removed the FFM marshaling penalty (parity at n=100k,
+where the old pair-path was ~2.1× slower) but single-threaded native radix loses at scale (0.64× at 1M);
+branch B (rayon), once its radix was capped, only reached parity at 1M (0.96×) and +3% at 5M (1.03×),
+losing below. Neither meets the gate's "clear win at n ≳ 10⁵". The one lever that helped — multicore —
+is better captured by a **parallel Java `radix.lsd`** (same gain, no FFM/Rust/JDK-22 dependency). **Native
+radix is not integrated**; the off-heap buffer + sequential/parallel kernels are retained as a recorded,
+reproducible exploration and a substrate should a future native need arise.
 **Deciders:** Richmond (project owner)
 **Related:** `docs/adr-phase2-rust-ffm-kernel.md` (the Rust kernel; item 7 deferred for lack of margin),
 `sbs-kernels-rust/` (the FFM module), `core/SortBuffer.java` (the on-heap buffer this complements)
@@ -147,3 +150,26 @@ parallel scatter flip the 0.64× single-thread loss to a win? Run `:sbs-kernels-
 `parX` column) on the host; if it wins, JMH-confirm vs production `radix.lsd`, then revisit selector
 integration. The parallel scatter uses one `unsafe` block (each thread writes a disjoint, in-bounds
 index range — no aliasing); that invariant is what the `cargo test` cases guard.
+
+**Branch B measured (2026-06-21, host JDK 22, 24 threads, random full-range `long[]`, avg ms/op):**
+
+| n | java (ms) | seq (ms) | par (ms) | parX |
+|---|---|---|---|---|
+| 100,000 | 1.049 | 1.423 | 2.495 | 0.42× |
+| 1,000,000 | 9.996 | 19.165 | 10.422 | 0.96× |
+| 5,000,000 | 62.117 | 124.680 | 60.589 | 1.03× |
+
+A first, un-capped run was catastrophic (parX 0.12–0.15× at 100k–1M) because the entropy plan's large
+radix blew up the per-pass `radix × num_chunks` histogram/offset work; capping the parallel radix at 8
+bits fixed that (above). (Below the 65 536 parallel threshold the kernel falls back to sequential, so the
+1k/10k rows just mirror `seq`.)
+
+**Final verdict — Phase 2 native radix closes NEGATIVE.** Parallel only reaches parity at 1M (0.96×) and
++3% at 5M (1.03×), losing below — not a clear win, and measured against a fixed-8-pass baseline that the
+production entropy-aware `radix.lsd` already matches or beats. The decisive observation: the sole source
+of any gain was **multicore**, which is capturable by a **parallel Java `radix.lsd`** — same speedup,
+none of the FFM marshaling, Rust toolchain, `unsafe`, JDK-22 requirement, or `long[]`-only payload limit.
+So `radix.lsd.rust` / `.offheap` / `.par` are **not** integrated into the selector. If large-n radix
+throughput ever matters, the recommended path is parallelizing the Java radix, not the native kernel. The
+artifacts here stand as a reproducible record of *why* the native route was rejected (and a substrate if a
+genuinely native-only need — e.g. SIMD the JVM can't emit — arises later).

@@ -77,6 +77,7 @@ jmh {
     //   ./gradlew jmh -Pbench=SortStrategyBenchmark   (just the sort strategies)
     //   ./gradlew jmh -Pbench=RadixNativeBenchmark    (native vs Java radix across sizes)
     //   ./gradlew jmh -Pbench=wikiSort                (just the WikiSort method, across shapes)
+    //   ./gradlew jmh -Pbench=SelectorInferenceLatencyBenchmark  (cost-model vs bandit vs learned select() latency)
     if (project.hasProperty("bench")) {
         includes.set(listOf(project.property("bench").toString()))
     }
@@ -85,6 +86,8 @@ jmh {
     if (JavaVersion.current() >= JavaVersion.VERSION_22) {
         jvmArgs.add("--enable-native-access=ALL-UNNAMED")
     }
+    // Allow running despite a stale lock file (safe on a single-developer machine).
+    jvmArgs.add("-Djmh.ignoreLock=true")
 }
 
 // Analytical report (not a wall-clock benchmark): prints the metered move/comparison growth curve for

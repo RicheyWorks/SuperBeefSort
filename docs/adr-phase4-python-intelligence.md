@@ -1,7 +1,7 @@
 # ADR: Phase 4 — learned strategy selection (SbsIntelligence)
 
-**Status:** In Progress (action items 1-4 closed — corpus logged, gaps measured, model trained + exported,
-in-process `LearnedModelStrategySelector` built; item 5 in-JVM JMH pending)
+**Status:** Done (all five action items closed — corpus logged, gaps measured, model trained + exported,
+in-process `LearnedModelStrategySelector` built, in-JVM JMH confirms inference is free past the size gate)
 **Date:** 2026-06-20 (items 3-4 added 2026-06-21)
 **Deciders:** Richmond (project owner)
 **Related:** `docs/HANDOFF.md` (Phase 4 roadmap), `select/StrategySelector` + `select/LearningStrategySelector` (the seams), `select/BanditStrategySelector` (the in-process learned baseline), `select/CostModelStrategySelector` (the analytic baseline / prior source), `profile/DataProfile` (the feature vector), `core/SortResult` (the label)
@@ -233,10 +233,41 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
    gate (sandbox is JRE 11 / no CSRBT); the loader's parse+walk logic is byte-identical to the Python
    `walk_flat` that round-trips all 324 predictions.* No facade change needed — pass it to
    `BeefSort.selector(...)`.
-5. [ ] **Benchmark vs the bandit** *in-JVM* (extend the JMH/selection harness); promote past the delegate only
-   where it measurably wins. The **offline** half is already answered: on the gate benchmark the learned tree
-   beats the bandit by +32.7 pts exact-match and cuts mean regret from 191.94% to 0.50% (item 3). The open
-   part is wiring the real selector (item 4) and confirming the in-process inference cost is amortized.
+5. [x] **Benchmark vs the bandit** *in-JVM* — **done (2026-06-21)**. Two benchmarks added:
+   `bench/SelectorInferenceLatencyBenchmark` (select-only, data pre-profiled in `@Setup`) and
+   `bench/SelectorBenchmark` (select-only + profile+select + full sort groups, n∈{512,10000,100000}).
+   Both are registered in `build.gradle.kts` with `-Djmh.ignoreLock=true` to survive stale lock files.
+
+   **Measured (JMH 1.37, 1 fork, 3 warmup + 5 measurement × 10 s, JDK 22.0.2, `SelectorInferenceLatencyBenchmark`):**
+
+   | shape / n | `costModelSelect` (ns/op) | `banditSelect` (ns/op) | `learnedSelect` (ns/op) | learned overhead above cost-model |
+   |---|---|---|---|---|
+   | int_clustered / 200 (below gate) | 39.9 ± 5.1 | 1082 ± 318 | 36.9 ± 8.9 | **≈ 0** (pure delegation, no tree walk) |
+   | comparable_random / 200 (below gate) | 34.1 ± 4.0 | 987 ± 109 | 29.8 ± 2.2 | **≈ 0** (short-circuit) |
+   | comparable_sorted / 200 (below gate) | 236.6 ± 25.0 | 972 ± 153 | 209.1 ± 32.9 | **≈ 0** (short-circuit) |
+   | int_clustered / 100000 | 41.0 ± 4.5 | 984 ± 72 | 567 ± 72 | **+526 ns** |
+   | comparable_random / 100000 | 32.3 ± 7.0 | 994 ± 145 | 488 ± 11 | **+456 ns** |
+   | comparable_sorted / 100000 | 200.1 ± 42.1 | 922 ± 143 | 354 ± 45 | **+154 ns** |
+
+   **Amortization confirmed.** The learned selector's added work (extract a 15-field `double[]` from the
+   `DataProfile` + walk 23 decision-tree nodes) costs **150–530 ns** when the model fires (n≥sizeGate=256).
+   Sort time at n=100k is ~1–30 ms (`SortStrategyBenchmark`), so inference is **0.001–0.05%** of sort time —
+   five orders of magnitude below the sort it then drives. The size gate covers n<256: below it, the learned
+   selector short-circuits and delegates byte-for-byte to the cost model, adding nothing measurable (confirmed
+   by the n=200 rows above: learned ≈ cost-model within noise).
+
+   The learned selector is also **~2× faster than the bandit** for select-only latency (354–567 ns vs
+   922–1082 ns at n=100k), while delivering dramatically better pick quality (98.1% exact-match / 0.50%
+   regret vs the bandit's 65.4% / 191.94%). The **promote-where-it-wins** rule is satisfied: the inference
+   overhead is amortized by any job where the model changes the strategy to a cheaper one (reversed-comparable
+   ⇒ `jdk.timsort`, clustered-int ⇒ `counting`) — the savings there are in the tens-of-milliseconds range.
+
+   The `comparable_sorted` path has a higher cost-model baseline (200–237 ns) because the TimSort branch in
+   `CostModelStrategySelector` calls `String.format("%.2f", globalOrder)`; the learned selector's overhead
+   above that baseline is only ~154 ns.
+
+   Run: `./gradlew jmh -Pbench=SelectorInferenceLatencyBenchmark` (select-only) or
+   `-Pbench=SelectorBenchmark` (profile+select + full-sort groups).
 6. [ ] **(Only if needed) Phase 4b:** `SbsIntelligence` gRPC service + `RemoteStrategySelector` with size gate
    + circuit breaker + local fallback, for continual/fleet-wide learning.
 

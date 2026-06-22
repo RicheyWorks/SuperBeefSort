@@ -9,7 +9,6 @@ import io.github.richeyworks.superbeefsort.profile.DataProfile;
 import io.github.richeyworks.superbeefsort.profile.IntelligentDataProfiler;
 import io.github.richeyworks.superbeefsort.profile.ProfileDepth;
 import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
-import io.github.richeyworks.superbeefsort.select.BanditStrategySelector;
 import io.github.richeyworks.superbeefsort.select.CostModelStrategySelector;
 import io.github.richeyworks.superbeefsort.select.LearnedModelStrategySelector;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
@@ -34,31 +33,24 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Phase 4 ADR action item 5: benchmark the learned selector in-JVM (ADR
+ * Phase 4 ADR action item 5: benchmark the learned selector <em>in the pipeline</em>, in-JVM (ADR
  * {@code docs/adr-phase4-python-intelligence.md}).
  *
- * <p>Three benchmark groups, all parameterised by input size and shape:</p>
+ * <p>Two benchmark groups, parameterised by input size and shape. (Raw select-only latency —
+ * cost-model vs bandit vs learned on a pre-built profile — lives in
+ * {@link SelectorInferenceLatencyBenchmark}; this class measures the cost of selection as part of the
+ * profile→select→sort pipeline, where it must be amortized.)</p>
  * <ol>
- *   <li><b>Select-only</b> ({@code costModelSelect}, {@code banditSelect}, {@code learnedSelect}):
- *       calls {@link io.github.richeyworks.superbeefsort.select.StrategySelector#select select()} on a
- *       pre-built {@link DataProfile}. Isolates raw selection overhead: cost-model arithmetic, bandit
- *       UCB table lookup, and — for the learned model — feature extraction from the profile plus the
- *       23-node decision-tree walk. Reported in <b>nanoseconds</b>.</li>
  *   <li><b>Profile + select</b> ({@code profileAndSelectCostModel}, {@code profileAndSelectLearned}):
  *       creates a fresh {@link SortBuffer} and runs the O(n) profiler then the selector. Shows the
  *       learned model's marginal overhead relative to the always-paid profiling cost.
- *       Reported in <b>nanoseconds</b> (numbers will be in the microsecond range at large n).</li>
+ *       Reported in <b>nanoseconds</b> (microsecond range at large n).</li>
  *   <li><b>Full sort</b> ({@code sortWithCostModel}, {@code sortWithLearned}): runs
  *       {@link BeefSortEngine#sort BeefSortEngine.sort()} end-to-end — profile → select → sort.
  *       Shows whether the learned selector's better pick (98.1% exact-match vs 60.5% for the cost
  *       model against the oracle) more than covers the inference overhead. Reported in
  *       <b>milliseconds</b>.</li>
  * </ol>
- *
- * <p>The learned selector's {@code sizeGate} (default 256) means at {@code n=512} the model fires,
- * while below it the selector delegates byte-for-byte to the cost model — the difference between
- * {@code learnedSelect} and {@code costModelSelect} at {@code n=512} reveals the per-inference cost
- * (feature extraction + tree walk) in isolation.</p>
  *
  * <p>Run: {@code ./gradlew jmh -Pbench=SelectorBenchmark}</p>
  */
@@ -75,14 +67,11 @@ public class SelectorBenchmark {
     @Param({"randomInts", "nearlySorted", "randomComparable"})
     public String shape;
 
-    // pre-profiled DataProfile reused by the select-only benchmarks
-    private DataProfile profile;
     private StrategyRegistry registry;
     private CostModelStrategySelector costModel;
-    private BanditStrategySelector bandit;
     private LearnedModelStrategySelector learned;
 
-    // source data and helpers reused by profile+select and full-sort benchmarks
+    // source data and helpers reused by both benchmark groups
     private List<Integer> data;
     private boolean intKeys;
     private final Comparator<Integer> cmp = Comparator.naturalOrder();
@@ -110,14 +99,8 @@ public class SelectorBenchmark {
             default -> throw new IllegalStateException("unknown shape: " + shape);
         }
 
-        SortBuffer<Integer> buf = intKeys
-                ? SortBuffer.of(data, cmp, encoder)
-                : SortBuffer.of(data, cmp);
-        profile = profiler.profile(buf, ProfileDepth.SHALLOW);
-
         registry = StrategyRegistry.withDefaults();
         costModel = new CostModelStrategySelector();
-        bandit = new BanditStrategySelector();
 
         // Load the exported decision tree; the path resolves relative to the Gradle project root
         // when JMH is launched via ./gradlew jmh.
@@ -129,31 +112,7 @@ public class SelectorBenchmark {
         learnedEngine   = new BeefSortEngine<>(learned,    ke);
     }
 
-    // ---- group 1: select-only (pre-profiled DataProfile, ns) ---- //
-
-    /** Analytic cost-model: arithmetic over the DataProfile fields. Baseline selection cost. */
-    @Benchmark
-    public SortPlan costModelSelect() {
-        return costModel.select(profile, SelectionPolicy.SMART, registry);
-    }
-
-    /** Contextual UCB bandit: hash-table context lookup + UCB score over ≤10 arms. */
-    @Benchmark
-    public SortPlan banditSelect() {
-        return bandit.select(profile, SelectionPolicy.SMART, registry);
-    }
-
-    /**
-     * Learned model: feature extraction from {@link DataProfile} (15 fields → double[]) +
-     * walk of the 23-node decision tree, then fallback to the cost-model delegate when below the
-     * size gate (n&lt;256), low-confidence, or inapplicable strategy predicted.
-     */
-    @Benchmark
-    public SortPlan learnedSelect() {
-        return learned.select(profile, SelectionPolicy.SMART, registry);
-    }
-
-    // ---- group 2: profile + select (O(n) profiling + inference, ns→µs range) ---- //
+    // ---- group 1: profile + select (O(n) profiling + inference, ns→µs range) ---- //
 
     /**
      * Creates a fresh {@link SortBuffer} and runs the O(n) profiler then the cost-model selector.
@@ -179,7 +138,7 @@ public class SelectorBenchmark {
         return learned.select(p, SelectionPolicy.SMART, registry);
     }
 
-    // ---- group 3: full engine — profile + select + sort (ms range) ---- //
+    // ---- group 2: full engine — profile + select + sort (ms range) ---- //
 
     /**
      * Full {@link BeefSortEngine} pipeline with the cost-model selector.

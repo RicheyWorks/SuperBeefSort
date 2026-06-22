@@ -235,7 +235,8 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
    `BeefSort.selector(...)`.
 5. [x] **Benchmark vs the bandit** *in-JVM* — **done (2026-06-21)**. Two benchmarks added:
    `bench/SelectorInferenceLatencyBenchmark` (select-only, data pre-profiled in `@Setup`) and
-   `bench/SelectorBenchmark` (select-only + profile+select + full sort groups, n∈{512,10000,100000}).
+   `bench/SelectorBenchmark` (profile+select + full-sort groups, n∈{512,10000,100000}) — the select-only
+   group was dropped as redundant with `SelectorInferenceLatencyBenchmark`.
    Both are registered in `build.gradle.kts` with `-Djmh.ignoreLock=true` to survive stale lock files.
 
    **Measured (JMH 1.37, 1 fork, 3 warmup + 5 measurement × 10 s, JDK 22.0.2, `SelectorInferenceLatencyBenchmark`):**

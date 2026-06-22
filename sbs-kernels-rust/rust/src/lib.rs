@@ -14,6 +14,8 @@
 //! Build:  cargo build --release   (produces sbsradix.dll / libsbsradix.so / libsbsradix.dylib)
 //! Test:   cargo test
 
+use rayon::prelude::*;
+
 /// Mirror of `RadixPlan.forWidth`: picks bits-per-pass minimising `passes * (n + 2^b)`.
 /// Returns `(bits_per_pass, passes)`. Zero passes when all keys are equal.
 fn radix_plan(significant_bits: u32, n: usize) -> (u32, u32) {
@@ -166,6 +168,115 @@ fn sort_flat(data: &mut [u64], n: usize) {
     }
 }
 
+/// A `*mut u64` that is `Send`/`Sync` so the parallel scatter closure can write through it from
+/// worker threads. Safety is upheld by the caller: each thread only writes a disjoint, in-bounds
+/// index range, so there is no aliasing despite the shared base pointer.
+struct ScatterPtr(*mut u64);
+unsafe impl Send for ScatterPtr {}
+unsafe impl Sync for ScatterPtr {}
+impl ScatterPtr {
+    // Accessed via a &self method (not the `.0` field) so the parallel closure captures the whole
+    // Sync wrapper, not the bare `*mut u64` field (Rust 2021 disjoint-capture would pick the field,
+    // which is !Sync). Returns the shared base pointer; threads write only disjoint index ranges.
+    #[inline]
+    fn raw(&self) -> *mut u64 {
+        self.0
+    }
+}
+
+/// Rayon-parallel variant of [`sort_flat`] — Phase 2 branch B (ADR docs/adr-phase2-offheap-sortbuffer.md).
+/// Same stable LSD radix + offset-by-min + adaptive plan, but each pass runs as: (1) parallel per-chunk
+/// histograms, (2) a cheap sequential prefix that hands each (chunk, digit) a disjoint output region —
+/// digit-major then chunk-major, so stability is preserved — and (3) a parallel scatter where each chunk
+/// writes only into its own regions. Falls back to the sequential [`sort_flat`] below a threshold where
+/// thread overhead would dominate.
+fn sort_flat_parallel(data: &mut [u64], n: usize) {
+    const PAR_THRESHOLD: usize = 1 << 16; // 65_536 — below this, thread setup costs more than it saves
+    if n < PAR_THRESHOLD {
+        sort_flat(data, n);
+        return;
+    }
+
+    let mut min_key = data[0];
+    let mut max_key = data[0];
+    for i in 0..n {
+        let k = data[i];
+        if k < min_key {
+            min_key = k;
+        }
+        if k > max_key {
+            max_key = k;
+        }
+    }
+    let range = max_key.wrapping_sub(min_key);
+    let significant_bits = if range == 0 { 0 } else { 64 - range.leading_zeros() };
+    let (bits_per_pass, passes) = radix_plan(significant_bits, n);
+    if passes == 0 {
+        return; // all keys equal — already in order
+    }
+    let radix = 1usize << bits_per_pass;
+    let mask = radix as u64 - 1;
+
+    let mut src = vec![0u64; n];
+    src.par_iter_mut()
+        .zip(data.par_iter())
+        .for_each(|(s, &d)| *s = d.wrapping_sub(min_key)); // offset-by-min
+    let mut dst = vec![0u64; n];
+
+    let p = rayon::current_num_threads().max(1);
+    let chunk = (n + p - 1) / p; // ceil; par_chunks yields ceil(n/chunk) chunks
+    let num_chunks = (n + chunk - 1) / chunk;
+
+    for pass in 0..passes {
+        let shift = pass * bits_per_pass;
+
+        // 1) parallel per-chunk histograms (read-only on src — safe)
+        let hists: Vec<Vec<usize>> = src
+            .par_chunks(chunk)
+            .map(|c| {
+                let mut h = vec![0usize; radix];
+                for &v in c {
+                    h[((v >> shift) & mask) as usize] += 1;
+                }
+                h
+            })
+            .collect();
+
+        // 2) sequential global offsets, digit-major then chunk-major => stable
+        let mut base = vec![vec![0usize; radix]; num_chunks];
+        let mut prefix = 0usize;
+        for d in 0..radix {
+            for c in 0..num_chunks {
+                base[c][d] = prefix;
+                prefix += hists[c][d];
+            }
+        }
+
+        // 3) parallel scatter into disjoint regions of dst
+        let dst_ptr = ScatterPtr(dst.as_mut_ptr());
+        src.par_chunks(chunk).enumerate().for_each(|(ci, c)| {
+            let ptr = dst_ptr.raw();
+            let mut cur = base[ci].clone(); // per-thread cursors, seeded from this chunk's bases
+            for &v in c {
+                let d = ((v >> shift) & mask) as usize;
+                let pos = cur[d];
+                cur[d] += 1;
+                // Safety: pos in [base[ci][d], base[ci][d]+hists[ci][d]) ⊂ [0, n); these ranges are
+                // disjoint across all (ci, d), so concurrent writes through dst_ptr never alias.
+                unsafe {
+                    *ptr.add(pos) = v;
+                }
+            }
+        });
+
+        std::mem::swap(&mut src, &mut dst);
+    }
+
+    data.par_iter_mut()
+        .zip(src.par_iter())
+        .for_each(|(d, &s)| *d = s.wrapping_add(min_key)); // un-offset
+}
+
 /// Stable sort of `count` (key, payload) pairs packed as interleaved u64 values.
 ///
 /// `ptr` points to `count * 2` consecutive u64 values: `[key0, pay0, key1, pay1, ...]`.
@@ -198,6 +309,21 @@ pub extern "C" fn sbs_radix_sort_longs(ptr: *mut u64, count: usize) {
     // and does not access the segment concurrently with this call.
     let data = unsafe { std::slice::from_raw_parts_mut(ptr, count) };
     sort_flat(data, count);
+}
+
+/// Rayon-parallel stable sort of `count` flat u64 keys in place — same contract as
+/// [`sbs_radix_sort_longs`], but the histogram + scatter run across rayon's thread pool (Phase 2
+/// branch B). No-op for a null pointer or `count < 2`; below an internal threshold it falls back to
+/// the sequential path, so it is always safe to call.
+#[no_mangle]
+pub extern "C" fn sbs_radix_sort_longs_par(ptr: *mut u64, count: usize) {
+    if ptr.is_null() || count < 2 {
+        return;
+    }
+    // Safety: as in sbs_radix_sort_longs — the Java caller owns a confined, 8-byte-aligned segment of
+    // exactly count u64s and does not touch it concurrently with this call.
+    let data = unsafe { std::slice::from_raw_parts_mut(ptr, count) };
+    sort_flat_parallel(data, count);
 }
 
 #[cfg(test)]
@@ -348,5 +474,40 @@ mod tests {
         let mut one = vec![42u64];
         sbs_radix_sort_longs(one.as_mut_ptr(), 1); // no-op
         assert_eq!(one, vec![42]);
+    }
+
+    // ── rayon-parallel entry (branch B) ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parallel_matches_sort_across_sizes() {
+        let mut seed = 0xDEAD_BEEF_CAFE_F00Du64;
+        let next = |s: &mut u64| {
+            *s ^= *s << 13;
+            *s ^= *s >> 7;
+            *s ^= *s << 17;
+            *s
+        };
+        // sizes below and above PAR_THRESHOLD (65_536) exercise both the fallback and parallel paths
+        for &n in &[2usize, 1_000, 70_000, 200_000] {
+            let mut v: Vec<u64> = (0..n).map(|_| next(&mut seed) % 1_000_000).collect();
+            let mut want = v.clone();
+            want.sort();
+            sort_flat_parallel(&mut v, n);
+            assert_eq!(v, want, "n={n}");
+        }
+    }
+
+    #[test]
+    fn parallel_c_abi_and_high_magnitude() {
+        sbs_radix_sort_longs_par(std::ptr::null_mut(), 0);
+        // narrow high-magnitude band, above the parallel threshold
+        let base = 1_000_000_000u64;
+        let mut v: Vec<u64> =
+            (0..80_000u64).map(|i| base + (i.wrapping_mul(2_654_435_761) % 4096)).collect();
+        let mut want = v.clone();
+        want.sort();
+        let n = v.len();
+        sbs_radix_sort_longs_par(v.as_mut_ptr(), n);
+        assert_eq!(v, want);
     }
 }

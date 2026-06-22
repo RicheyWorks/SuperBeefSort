@@ -153,7 +153,10 @@ public final class CostModelStrategySelector implements StrategySelector {
         if (timsortCost < bestCost && withinSmartBudget(JdkSortStrategy.ID, n, registry)) {
             bestId = JdkSortStrategy.ID;
             bestCost = timsortCost;
-            why = "few runs (~" + runs + "), global-order " + String.format("%.2f", globalOrder) + " -> TimSort";
+            // Cheap 2-decimal render of globalOrder: integer-rounded concat, not String.format's Formatter
+            // machinery — this branch fires on every ordered input (TimSort provisionally best), so it is the
+            // selection hot path. No consumer needs exact "%.2f" trailing zeros.
+            why = "few runs (~" + runs + "), global-order " + (Math.round(globalOrder * 100.0) / 100.0) + " -> TimSort";
         }
 
         // Insertion sort's real cost is its adaptive O(n + inversions). Only trusted when the inversion

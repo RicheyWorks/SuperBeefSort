@@ -78,3 +78,15 @@ tasks.test {
     // Panama FFM requires native-access permission on JDK 22+
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
+
+// Off-heap long radix prototype timing (ADR docs/adr-phase2-offheap-sortbuffer.md). The off-heap path
+// (bulk copy + in-place native sort, no per-element marshaling) vs an inline Java radix baseline.
+// Run: ./gradlew :sbs-kernels-rust:offHeapBench   (Gradle JVM must be 22+; cargo build runs via processResources)
+tasks.register<JavaExec>("offHeapBench") {
+    group = "verification"
+    description = "Time off-heap native long radix vs an inline Java radix baseline."
+    dependsOn(tasks.processResources)
+    mainClass.set("io.github.richeyworks.sbskernels.rust.OffHeapRadixBenchmark")
+    classpath = sourceSets["main"].runtimeClasspath
+    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx2g")
+}

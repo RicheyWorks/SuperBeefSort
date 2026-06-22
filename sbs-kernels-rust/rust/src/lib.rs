@@ -104,6 +104,68 @@ fn sort_keyed_flat(data: &mut [u64], n: usize) {
     }
 }
 
+/// Stable LSD radix sort of `n` flat u64 keys in `data[0..n]` — the stride-1 sibling of
+/// [`sort_keyed_flat`], with no payload field. Same offset-by-min + adaptive [`radix_plan`]. Used by
+/// the off-heap long fast path, where the values *are* the keys, so no index payload is carried (half
+/// the bytes, no permutation). Stable for equal keys (forward scatter), though without a payload that
+/// is only observable as "already-sorted equal runs stay put".
+fn sort_flat(data: &mut [u64], n: usize) {
+    if n < 2 {
+        return;
+    }
+
+    let mut min_key = data[0];
+    let mut max_key = data[0];
+    for i in 0..n {
+        let k = data[i];
+        if k < min_key {
+            min_key = k;
+        }
+        if k > max_key {
+            max_key = k;
+        }
+    }
+
+    let range = max_key.wrapping_sub(min_key);
+    let significant_bits = if range == 0 { 0 } else { 64 - range.leading_zeros() };
+    let (bits_per_pass, passes) = radix_plan(significant_bits, n);
+    if passes == 0 {
+        return; // all keys equal — already in order
+    }
+
+    let radix = 1usize << bits_per_pass;
+    let mask = radix as u64 - 1;
+
+    let mut src = vec![0u64; n];
+    for i in 0..n {
+        src[i] = data[i].wrapping_sub(min_key); // offset-by-min
+    }
+    let mut dst = vec![0u64; n];
+
+    for pass in 0..passes {
+        let shift = pass * bits_per_pass;
+        let mut count = vec![0usize; radix + 1];
+        for i in 0..n {
+            let digit = ((src[i] >> shift) & mask) as usize;
+            count[digit + 1] += 1;
+        }
+        for d in 0..radix {
+            count[d + 1] += count[d];
+        }
+        for i in 0..n {
+            let digit = ((src[i] >> shift) & mask) as usize;
+            let pos = count[digit];
+            dst[pos] = src[i];
+            count[digit] += 1;
+        }
+        std::mem::swap(&mut src, &mut dst);
+    }
+
+    for i in 0..n {
+        data[i] = src[i].wrapping_add(min_key);
+    }
+}
+
 /// Stable sort of `count` (key, payload) pairs packed as interleaved u64 values.
 ///
 /// `ptr` points to `count * 2` consecutive u64 values: `[key0, pay0, key1, pay1, ...]`.
@@ -119,6 +181,23 @@ pub extern "C" fn sbs_radix_sort_keyed(ptr: *mut u64, count: usize) {
     // aligned to 8 bytes, and does not access the segment concurrently with this call.
     let data = unsafe { std::slice::from_raw_parts_mut(ptr, count * 2) };
     sort_keyed_flat(data, count);
+}
+
+/// Stable sort of `count` flat u64 keys (no payload field) packed consecutively in `ptr[0..count]`.
+///
+/// Keys are u64 (the Java caller XORs `Long.MIN_VALUE` for signed→unsigned ordering). Sorted ascending
+/// in place; equal keys keep their relative order. No-op for a null pointer or `count < 2`. This is the
+/// entry for the off-heap long fast path, which bulk-copies a `long[]` into a `MemorySegment` and sorts
+/// it in place — no per-element marshaling and no (key, index) pairing.
+#[no_mangle]
+pub extern "C" fn sbs_radix_sort_longs(ptr: *mut u64, count: usize) {
+    if ptr.is_null() || count < 2 {
+        return;
+    }
+    // Safety: the Java caller allocates a confined `Arena` of exactly `count * 8` bytes, 8-byte aligned,
+    // and does not access the segment concurrently with this call.
+    let data = unsafe { std::slice::from_raw_parts_mut(ptr, count) };
+    sort_flat(data, count);
 }
 
 #[cfg(test)]
@@ -214,5 +293,60 @@ mod tests {
         let mut v = vec![9u64, 0u64]; // one pair
         sbs_radix_sort_keyed(v.as_mut_ptr(), 1); // no-op
         assert_eq!(v, vec![9, 0]);
+    }
+
+    // ── flat-long entry (off-heap fast path) ──────────────────────────────────────────────────
+
+    #[test]
+    fn flat_sorts_random() {
+        let mut seed = 0x1234_5678_9ABC_DEF0u64;
+        let next = |s: &mut u64| {
+            *s ^= *s << 13;
+            *s ^= *s >> 7;
+            *s ^= *s << 17;
+            *s % 1000
+        };
+        for trial in 0..300 {
+            let n = (trial * 5 + 2) % 250 + 2;
+            let mut v: Vec<u64> = (0..n).map(|_| next(&mut seed)).collect();
+            let mut want = v.clone();
+            want.sort();
+            sort_flat(&mut v, n);
+            assert_eq!(v, want, "trial={trial}, n={n}");
+        }
+    }
+
+    #[test]
+    fn flat_edges_and_high_magnitude() {
+        let mut empty: Vec<u64> = vec![];
+        sort_flat(&mut empty, 0);
+
+        let base = 1_000_000_000u64;
+        let mut v = vec![base + 5, base + 1, base + 3, base + 2, base];
+        let mut want = v.clone();
+        want.sort();
+        let n = v.len();
+        sort_flat(&mut v, n);
+        assert_eq!(v, want);
+
+        let mut full = vec![u64::MAX, 0, u64::MAX / 2, 7];
+        let mut wf = full.clone();
+        wf.sort();
+        sort_flat(&mut full, 4);
+        assert_eq!(full, wf);
+
+        let mut all_eq = vec![42u64; 8];
+        let we = all_eq.clone();
+        sort_flat(&mut all_eq, 8);
+        assert_eq!(all_eq, we);
+    }
+
+    #[test]
+    fn flat_c_abi_safe_for_null_and_short() {
+        sbs_radix_sort_longs(std::ptr::null_mut(), 0);
+        sbs_radix_sort_longs(std::ptr::null_mut(), 5);
+        let mut one = vec![42u64];
+        sbs_radix_sort_longs(one.as_mut_ptr(), 1); // no-op
+        assert_eq!(one, vec![42]);
     }
 }

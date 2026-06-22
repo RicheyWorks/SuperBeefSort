@@ -26,29 +26,52 @@ final class RustRadixBridge {
 
     private static final boolean AVAILABLE;
     private static final MethodHandle SBS_RADIX_SORT_KEYED;
+    private static final boolean LONGS_AVAILABLE;
+    private static final MethodHandle SBS_RADIX_SORT_LONGS;
 
     static {
         boolean ok = false;
         MethodHandle mh = null;
+        boolean longsOk = false;
+        MethodHandle mhLongs = null;
         try {
             Path libPath = extractNativeLib();
             Linker linker = Linker.nativeLinker();
             // Arena.global() keeps the library mapped for the process lifetime
             SymbolLookup lib = SymbolLookup.libraryLookup(libPath, Arena.global());
+            FunctionDescriptor ptrLen = FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.JAVA_LONG);
             mh = linker.downcallHandle(
                     lib.find("sbs_radix_sort_keyed").orElseThrow(
                             () -> new UnsatisfiedLinkError("sbs_radix_sort_keyed not found in " + libPath)),
-                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+                    ptrLen);
             ok = true;
+            // The flat-long entry is newer; tolerate its absence in an older cdylib without disabling
+            // the (key, index) path above — only the off-heap long fast path goes unavailable.
+            try {
+                mhLongs = linker.downcallHandle(
+                        lib.find("sbs_radix_sort_longs").orElseThrow(
+                                () -> new UnsatisfiedLinkError("sbs_radix_sort_longs not found in " + libPath)),
+                        ptrLen);
+                longsOk = true;
+            } catch (Throwable ignoredLongs) {
+                // older kernel without the flat-long entry → off-heap long path unavailable
+            }
         } catch (Throwable ignored) {
             // Missing cdylib, unsupported OS, or native-access not granted → AVAILABLE = false
         }
         AVAILABLE = ok;
         SBS_RADIX_SORT_KEYED = mh;
+        LONGS_AVAILABLE = longsOk;
+        SBS_RADIX_SORT_LONGS = mhLongs;
     }
 
     static boolean isAvailable() {
         return AVAILABLE;
+    }
+
+    /** True when the flat-long entry ({@code sbs_radix_sort_longs}) is present in the loaded cdylib. */
+    static boolean isLongsAvailable() {
+        return LONGS_AVAILABLE;
     }
 
     /**
@@ -58,6 +81,15 @@ final class RustRadixBridge {
      */
     static void sortKeyed(MemorySegment seg, int count) throws Throwable {
         SBS_RADIX_SORT_KEYED.invoke(seg, (long) count);
+    }
+
+    /**
+     * Sort {@code count} flat u64 keys packed consecutively in {@code seg} (no payload field), ascending,
+     * in place. The off-heap long fast path uses this: bulk-copy a {@code long[]} into the segment and
+     * sort it in place — no per-element marshaling, no (key, index) pairing.
+     */
+    static void sortLongs(MemorySegment seg, int count) throws Throwable {
+        SBS_RADIX_SORT_LONGS.invoke(seg, (long) count);
     }
 
     // ── Native-library extraction ────────────────────────────────────────────────────────────

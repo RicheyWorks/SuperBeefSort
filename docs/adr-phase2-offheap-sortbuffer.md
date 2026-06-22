@@ -137,3 +137,13 @@ a multi-threaded scatter the JVM can't cheaply match; the off-heap segment is th
 to eat the parallel speedup). Pursue it against the **production entropy-aware `radix.lsd`** (not the
 fixed-8-pass baseline), and confirm with **JMH** (forks/steady-state) before any integration claim. The
 off-heap path remains `long[]`-only — arbitrary `K` payloads still need an on-heap permutation pass.
+
+**Update (2026-06-21) — branch B prototyped.** `rust/src/lib.rs` now has `sort_flat_parallel`
+(chunked parallel histogram → sequential disjoint-offset prefix → parallel scatter, stable) +
+`sbs_radix_sort_longs_par`; `OffHeapLongRadix.sortParallel` and the `par` column in
+`OffHeapRadixBenchmark` exercise it. Rust correctness is covered by `cargo test` (sizes spanning the
+65 536-element sequential-fallback threshold). The open question is purely the n≥1M timing — does
+parallel scatter flip the 0.64× single-thread loss to a win? Run `:sbs-kernels-rust:offHeapBench` (the
+`parX` column) on the host; if it wins, JMH-confirm vs production `radix.lsd`, then revisit selector
+integration. The parallel scatter uses one `unsafe` block (each thread writes a disjoint, in-bounds
+index range — no aliasing); that invariant is what the `cargo test` cases guard.

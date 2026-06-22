@@ -210,10 +210,17 @@ fn sort_flat_parallel(data: &mut [u64], n: usize) {
     }
     let range = max_key.wrapping_sub(min_key);
     let significant_bits = if range == 0 { 0 } else { 64 - range.leading_zeros() };
-    let (bits_per_pass, passes) = radix_plan(significant_bits, n);
-    if passes == 0 {
+    let (plan_bits, plan_passes) = radix_plan(significant_bits, n);
+    if plan_passes == 0 {
         return; // all keys equal — already in order
     }
+    // Cap the radix for the parallel path. Per-pass overhead here (a per-chunk histogram of `radix`
+    // counts, the O(radix × num_chunks) sequential offset prefix, and a per-chunk cursor clone) scales
+    // with radix, so the entropy plan's large radix — which minimises the *sequential* pass count —
+    // would dwarf any parallel gain. 8 bits/pass keeps those structures tiny (256 counts) at the cost
+    // of a few more passes, which parallelise well.
+    let bits_per_pass = plan_bits.min(8);
+    let passes = (significant_bits + bits_per_pass - 1) / bits_per_pass;
     let radix = 1usize << bits_per_pass;
     let mask = radix as u64 - 1;
 

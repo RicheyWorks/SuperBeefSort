@@ -28,12 +28,16 @@ final class RustRadixBridge {
     private static final MethodHandle SBS_RADIX_SORT_KEYED;
     private static final boolean LONGS_AVAILABLE;
     private static final MethodHandle SBS_RADIX_SORT_LONGS;
+    private static final boolean LONGS_PAR_AVAILABLE;
+    private static final MethodHandle SBS_RADIX_SORT_LONGS_PAR;
 
     static {
         boolean ok = false;
         MethodHandle mh = null;
         boolean longsOk = false;
         MethodHandle mhLongs = null;
+        boolean parOk = false;
+        MethodHandle mhPar = null;
         try {
             Path libPath = extractNativeLib();
             Linker linker = Linker.nativeLinker();
@@ -56,6 +60,15 @@ final class RustRadixBridge {
             } catch (Throwable ignoredLongs) {
                 // older kernel without the flat-long entry → off-heap long path unavailable
             }
+            try {
+                mhPar = linker.downcallHandle(
+                        lib.find("sbs_radix_sort_longs_par").orElseThrow(
+                                () -> new UnsatisfiedLinkError("sbs_radix_sort_longs_par not found in " + libPath)),
+                        ptrLen);
+                parOk = true;
+            } catch (Throwable ignoredPar) {
+                // older kernel without the parallel entry → parallel path unavailable
+            }
         } catch (Throwable ignored) {
             // Missing cdylib, unsupported OS, or native-access not granted → AVAILABLE = false
         }
@@ -63,6 +76,8 @@ final class RustRadixBridge {
         SBS_RADIX_SORT_KEYED = mh;
         LONGS_AVAILABLE = longsOk;
         SBS_RADIX_SORT_LONGS = mhLongs;
+        LONGS_PAR_AVAILABLE = parOk;
+        SBS_RADIX_SORT_LONGS_PAR = mhPar;
     }
 
     static boolean isAvailable() {
@@ -90,6 +105,19 @@ final class RustRadixBridge {
      */
     static void sortLongs(MemorySegment seg, int count) throws Throwable {
         SBS_RADIX_SORT_LONGS.invoke(seg, (long) count);
+    }
+
+    /** True when the rayon-parallel flat-long entry ({@code sbs_radix_sort_longs_par}) is present. */
+    static boolean isLongsParallelAvailable() {
+        return LONGS_PAR_AVAILABLE;
+    }
+
+    /**
+     * Like {@link #sortLongs} but the native kernel runs its histogram + scatter across rayon's thread
+     * pool (Phase 2 branch B). Below an internal size threshold the kernel falls back to sequential.
+     */
+    static void sortLongsParallel(MemorySegment seg, int count) throws Throwable {
+        SBS_RADIX_SORT_LONGS_PAR.invoke(seg, (long) count);
     }
 
     // ── Native-library extraction ────────────────────────────────────────────────────────────

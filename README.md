@@ -5,7 +5,7 @@
 [![Java 17](https://img.shields.io/badge/Java-17-orange.svg)](https://adoptium.net/)
 [![Build: Gradle](https://img.shields.io/badge/build-Gradle%209-02303A.svg?logo=gradle)](https://gradle.org/)
 [![Feeds: CSRBT](https://img.shields.io/badge/feeds-CSRBT-534AB7.svg)](https://github.com/RicheyWorks/CSRBT)
-[![Status: Phase 3](https://img.shields.io/badge/status-Phase%203-1D9E75.svg)](docs/ARCHITECTURE.md)
+[![Status: Phases 0–5](https://img.shields.io/badge/status-Phases%200--5-1D9E75.svg)](docs/ARCHITECTURE.md)
 
 A polyglot, dual-domain, pluggable sorting **engine** that intelligently feeds
 [CSRBT](https://github.com/RicheyWorks/CSRBT). It profiles the data, picks an algorithm and a
@@ -23,15 +23,18 @@ interfaces.
 
 **Docs:** [architecture & design](docs/ARCHITECTURE.md) · [CSRBT integration](docs/architecture-csrbt-integration.md) · [Phase 3 parallel-feed design](docs/PHASE3-PARALLEL-FEED.md) · [handoff notes](docs/HANDOFF.md) · [ideas backlog](docs/IDEAS.md) · [step visualizer](web/visualizer.html)
 
+**Decision records (ADRs):** [Phase 4 — learned selection](docs/adr-phase4-python-intelligence.md) · [Phase 5 — observability & out-of-core scale](docs/adr-phase5-observability-scale.md) · [Phase 2 — Rust FFM kernel](docs/adr-phase2-rust-ffm-kernel.md) + [off-heap / rayon verdict](docs/adr-phase2-offheap-sortbuffer.md) · [CSRBT integration deepening](docs/adr-csrbt-integration-deepening.md) · [WikiSort block merge](docs/adr-wikisort-duplicate-block-merge.md) · [TimSort inversion galloping](docs/adr-timsort-inversion-galloping.md)
+
 ## Status
 
 | Phase | Scope | State |
 |-------|-------|-------|
 | 0 | Pure-Java skeleton: pipeline, 6 comparison strategies, SPI registry, balanced + health-gated CSRBT feeders | ✅ done |
 | 1 | Intelligence: HyperLogLog profiler, integer key stats + distribution, counting/LSD-radix sorts, capability-gated selection | ✅ done |
-| 2 | Rust radix kernel via Panama FFM (Java fallback retained) | **PoC proven** ([`phase2-ffm/`](phase2-ffm/)); productization planned |
+| 2 | Rust radix kernel via Panama FFM (Java fallback retained) | ✅ **productized** ([`sbs-kernels-rust/`](sbs-kernels-rust/)); off-heap buffer + rayon-parallel kernel explored and [**closed negative**](docs/adr-phase2-offheap-sortbuffer.md) — native radix only ties a JIT'd Java radix at scale, so it is **not** integrated and the Java path stays default |
 | 3 | Ensemble **parallel mirror feed** (O(n)/member bulk-build) · **bounded streaming feed** with health backpressure · born-optimal CSRBT builds + adaptation | ✅ done |
-| 4–5 | Python ML selection · distributed / external sort | planned |
+| 4 | **Learned strategy selection**: an offline-trained decision tree over the `DataProfile` vector, exported to a dependency-free flat model and evaluated **in-process** behind a confidence + size gate, wrapping the cost-model delegate. **98.1% exact-match / 0.50% mean regret** vs the bandit's 65.4% / 191.94% on the held-out gate benchmark ([ADR](docs/adr-phase4-python-intelligence.md) · [trainer](tools/phase4/)). Optional gRPC service (4b) deferred — not needed for in-process inference | ✅ done |
+| 5 | Out-of-core **external merge sort** (run-spill + k-way tournament merge, streams straight into CSRBT) · typed, versioned **step-event stream** (zero-cost when disabled) ([ADR](docs/adr-phase5-observability-scale.md)) | ✅ done |
 | ✦ | **Shipped beyond the plan:** cost-model + self-tuning (bandit) selectors · branchless sorting-network kernel · precision feeder · run-aware profiling + **global inversion signal** · **learned (sample) sort** · **MSD radix** (string/byte keys) · **deterministic mode** · **differential + anti-quicksort chaos tests** · `SortReport` · JMH · CI · web step-visualizer with **self-contained record/replay** · **adaptive workload morphing** · **concept-drift adaptive streaming** (re-selects mid-stream) · **profile-guided co-optimization** (the sort primes the tree) · **entropy-aware LSD radix** (offset-by-min, adaptive base) · **stable in-place merge** (O(1) aux) · **WikiSort block merge** (`merge.wiki` — O(n log n) stable, O(1) aux, native duplicate handling) · **memory-aware selection** (declared `AuxMemory` + *measured* peak-aux metering, an opt-in auxiliary-memory budget across SMART/STABLE/facade, and a memory-weighted bandit cost) · **CSRBT ensemble promotion** (post-feed read-path migration via `EnsembleController` — an O(1) primary swap) · **post-feed adaptation observability** (`AdaptationReport`; "born-right ⇒ zero morphs" guardrail) · **Streams-API collectors** (`BeefCollectors`) | ✅ done |
 
 ## Build & test
@@ -79,7 +82,10 @@ BeefSort.with(Comparator.<Integer>naturalOrder())
 
 Without a `keyEncoder`, the engine behaves exactly like Phase 0 (comparison sorts only). Swap the
 selection brain with `.selector(new BanditStrategySelector())` — it learns the cheapest strategy per
-data shape across runs — add `.deterministic(seed)` for an exactly reproducible run (it seeds the
+data shape across runs — or `.selector(new LearnedModelStrategySelector(SelectorModel.load(modelPath)))`
+to drive selection with the offline-trained decision tree (it overrides the cost-model delegate only when
+the model is confident and the input is past a size gate, and falls back to it otherwise); add
+`.deterministic(seed)` for an exactly reproducible run (it seeds the
 randomized quicksort pivot), cap the scratch a `SMART`/`STABLE` selection may use with
 `.maxAuxMemory(bytes)` (it degrades to in-place sorts under memory pressure), and call
 `SortReport.of(result)` for a one-line dashboard of comparisons, moves, **measured peak aux**, feed
@@ -94,7 +100,10 @@ returns a drift-aware multi-batch driver; and `sortByteKeys(encoder)` runs the M
 byte-array keys. Once built, `OrderStats.of(set)` / `OrderStats.ofEnsemble(ensemble)` give a uniform
 order-statistics view (`median`, `percentile`, `select` / `rank`, `rangeQuery`) — the payoff of feeding an
 *ordered* structure, and the way to read those statistics off an ensemble (which exposes only the basics).
-And from the Streams API,
+For inputs larger than RAM, `BeefSort.external(serializer).runSize(r).fanIn(f).feedInto(set)` runs an
+**out-of-core merge sort** — it sorts fixed-size chunks with the full engine, spills them, then streams a
+k-way tournament merge straight into CSRBT without ever materializing the whole input (stable under
+`STABLE`). And from the Streams API,
 `stream.collect(BeefCollectors.toOrderedSet(cmp, enc))` runs the whole pipeline as a sink — sequential
 or parallel.
 
@@ -105,7 +114,7 @@ One pipeline, every stage pluggable:
 | Stage | Component | Behavior |
 |-------|-----------|----------|
 | Profile | `IntelligentDataProfiler` | sortedness + longest run + a true **inversion count** (global disorder, exact or sampled), distinct-count (HyperLogLog), integer key stats, distribution; validates the encoder is order-faithful before trusting it |
-| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; genuinely-few-inversion inputs route to adaptive insertion, and the cost-model/bandit can pick the learned sort — the bandit learns the cheapest per context from observed cost; an optional auxiliary-memory budget steers selection toward in-place sorts under memory pressure |
+| Select | `RuleBasedStrategySelector` (default) · opt-in `CostModelStrategySelector` · self-tuning `BanditStrategySelector` · offline-trained `LearnedModelStrategySelector` | capability/heuristic choice with a guaranteed introsort fallback; genuinely-few-inversion inputs route to adaptive insertion, and the cost-model/bandit can pick the learned sort — the bandit learns the cheapest per context from observed cost; the `LearnedModelStrategySelector` evaluates an offline-trained decision tree in-process and overrides the cost-model delegate only above a confidence + size gate; an optional auxiliary-memory budget steers selection toward in-place sorts under memory pressure |
 | Sort | `SortStrategy` via `StrategyRegistry` (SPI) | sorting-network · insertion · merge · **in-place merge** (stable, O(1) aux) · **WikiSort block merge** (stable, O(1) aux, O(n log n), native duplicates) · 3-way quick · heap · intro · JDK · counting · **entropy-aware LSD radix** · **MSD radix** (string/byte keys) · **learned** (distribution-adaptive sample sort) |
 | Feed | `SortFeeder` + `CsrbtTarget` | `BulkBuildFeeder` (O(n)) · `BalancedBuildFeeder` (median-first) · `HealthGatedFeeder` · `PrecisionFeeder` (validate-every-insert) · `ParallelFeeder` (mirror-ensemble fan-out) · `StreamingFeeder` (bounded sliding window) · `DirectFeeder` |
 
@@ -166,7 +175,7 @@ discovered on the classpath. The core never changes.
 
 ```
 src/main/java/io/github/richeyworks/superbeefsort/
-├── core/      SortStrategy, SortBuffer (metered), KeyEncoder, ByteSequenceEncoder, SortContext, SortObserver, SortEvent
+├── core/      SortStrategy, SortBuffer (metered), KeyEncoder, ByteSequenceEncoder, SortContext, SortObserver, SortEvent, StepEvent, StepEventSink
 ├── profile/   IntelligentDataProfiler, Hll, DataProfile, KeyStats, Distribution
 ├── select/    StrategySelector · RuleBasedStrategySelector · CostModelStrategySelector · BanditStrategySelector (+ LearningStrategySelector) · SortPlan · SelectionPolicy
 ├── strategy/  SortingNetwork · Insertion · Merge · In-place Merge · WikiSort (merge.wiki) · Quick (3-way) · Heap · Intro · JDK · Counting · LSD Radix · MSD Radix · Learned

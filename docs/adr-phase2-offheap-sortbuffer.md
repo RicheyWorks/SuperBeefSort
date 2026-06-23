@@ -173,3 +173,14 @@ So `radix.lsd.rust` / `.offheap` / `.par` are **not** integrated into the select
 throughput ever matters, the recommended path is parallelizing the Java radix, not the native kernel. The
 artifacts here stand as a reproducible record of *why* the native route was rejected (and a substrate if a
 genuinely native-only need — e.g. SIMD the JVM can't emit — arises later).
+
+**Follow-up (2026-06-22) — recommendation implemented.** This ADR's closing recommendation ("parallelize the
+Java `radix.lsd`, not the native kernel") is now realized as `strategy/ParallelRadixSortStrategy`
+(`radix.lsd.parallel`): a stable, multi-threaded LSD radix using the standard chunked-histogram →
+disjoint-offset prefix → parallel scatter schedule, with the per-pass radix **capped at 8 bits in the
+parallel path** — exactly the cap this ADR found necessary to stop the `radix × chunks` matrix from eating
+the speedup. Its output is byte-for-byte identical to sequential `radix.lsd` for any chunk count
+(deterministic + stable), and the algorithm is fuzz-validated 972/972 (`PRadixCheck`, real `ForkJoinPool`:
+sorted order + permutation + stability over every shape/size/chunk-count). It is registered and tested but
+**not yet selector-routed** — a host JMH crossover measurement vs sequential `radix.lsd` gates that, per this
+ADR's "confirm with JMH before any integration claim". See PROGRESS.md.

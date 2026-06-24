@@ -12,6 +12,7 @@ import io.github.richeyworks.superbeefsort.strategy.IntroSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.JdkSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MergeSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.MsdRadixSortStrategy;
+import io.github.richeyworks.superbeefsort.strategy.ParallelRadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.RadixSortStrategy;
 import io.github.richeyworks.superbeefsort.strategy.SortingNetworkStrategy;
 import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
@@ -27,6 +28,15 @@ import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 public final class RuleBasedStrategySelector implements StrategySelector {
 
     private static final long COUNTING_RANGE_FLOOR = 1L << 16;
+    // PROVISIONAL SMART crossover for routing wide-range integer inputs to the multi-threaded
+    // radix.lsd.parallel instead of the sequential radix.lsd. Pinned to the parallel strategy's own
+    // engage point: below it that strategy runs single-threaded (output identical to radix.lsd), so
+    // routing there would be a no-op; at/above it the histogram/scatter passes actually fan out across
+    // cores. radix.lsd.parallel is byte-for-byte deterministic + stable, so this changes only wall-clock,
+    // never results. The TRUE profit crossover is to be measured by the host JMH sweep
+    // (bench/ParallelRadixBenchmark); raise this constant if the measured crossover is higher.
+    // PENDING JMH CONFIRMATION.
+    private static final int PARALLEL_RADIX_CROSSOVER = ParallelRadixSortStrategy.PARALLEL_THRESHOLD;
     // WikiSort is ~2-3x slower than plain merge in wall-clock at every size (a higher comparison
     // constant), so it is only worth choosing when merge's O(n) scratch is genuinely prohibitive. Express
     // that as an explicit auxiliary-memory budget rather than a magic size: once merge's LINEAR aux (its
@@ -40,7 +50,7 @@ public final class RuleBasedStrategySelector implements StrategySelector {
         return switch (policy) {
             case FIXED_INTRO -> new SortPlan(IntroSortStrategy.ID, FeedMode.BULK, fallback, "fixed introsort");
             case STABLE -> stable(profile, fallback);
-            case SMART -> smart(profile, fallback);
+            case SMART -> smart(profile, fallback, registry);
         };
     }
 
@@ -69,7 +79,7 @@ public final class RuleBasedStrategySelector implements StrategySelector {
         return new SortPlan(MergeSortStrategy.ID, FeedMode.BULK, fallback, "stability requested -> merge sort");
     }
 
-    private SortPlan smart(DataProfile p, StrategyId fallback) {
+    private SortPlan smart(DataProfile p, StrategyId fallback, StrategyRegistry registry) {
         if (p.tiny()) {
             return new SortPlan(SortingNetworkStrategy.ID, FeedMode.BULK, fallback, "tiny input -> sorting network");
         }
@@ -100,6 +110,18 @@ public final class RuleBasedStrategySelector implements StrategySelector {
             if (counting) {
                 return new SortPlan(CountingSortStrategy.ID, FeedMode.BULK, fallback,
                         "bounded integer keys (range " + (span + 1) + ") -> counting sort");
+            }
+            // Wide-range integer keys -> LSD radix. For large inputs prefer the multi-threaded sibling:
+            // radix.lsd.parallel yields byte-for-byte the same (stable, deterministic) result as sequential
+            // radix.lsd but fans the histogram/scatter passes across cores -- a wall-clock win the metered
+            // comparisons+moves model cannot express, so it is a size gate, not a cost. Below the crossover the
+            // parallel strategy runs single-threaded anyway, so routing only engages once threads actually help.
+            // Guarded on registration so a custom registry lacking the parallel strategy falls back to radix.lsd.
+            // PROVISIONAL crossover -- pending the host JMH sweep (bench/ParallelRadixBenchmark).
+            if (p.size() >= PARALLEL_RADIX_CROSSOVER && registry.contains(ParallelRadixSortStrategy.ID)) {
+                return new SortPlan(ParallelRadixSortStrategy.ID, FeedMode.BULK, fallback,
+                        "large integer keys (" + p.size() + " >= " + PARALLEL_RADIX_CROSSOVER + ", ~"
+                                + p.distinctEstimate() + " distinct) -> parallel LSD radix");
             }
             return new SortPlan(RadixSortStrategy.ID, FeedMode.BULK, fallback,
                     "integer keys (~" + p.distinctEstimate() + " distinct) -> LSD radix");

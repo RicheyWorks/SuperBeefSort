@@ -1,10 +1,55 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-21. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 + Phase 3 done.
+Last updated: 2026-06-23. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 + Phase 3 done.
 Phase 2 Rust kernel productized; native is 2× slower than Java at n≥100k (FFM marshaling cost); selector
 integration deferred (item 7). Phase 4 gate measured: real exploitable gaps found; action item 2 closed;
 items 3-5 open. Phase 5 external merge sort + typed step-event stream done.**
 Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+
+## Session 2026-06-23 — Phase 2 item 7(b): provisional SMART routing for `radix.lsd.parallel`
+
+Continued from the previous session, which added the `bench/ParallelRadixBenchmark` JMH crossover sweep
+(`radix.lsd` vs `radix.lsd.parallel`, n ∈ {50k, 100k, 500k, 1M}). This session wired the **selector routing**
+(item 7(b)), provisionally — chosen because the host JMH can't run in the dev sandbox (JDK 11, no CSRBT,
+empty `gradlew`), so a measured crossover isn't available yet and won't be fabricated.
+
+**What changed:**
+
+- **`RuleBasedStrategySelector` (the engine default)** — `smart()` now takes the `registry` and, in the
+  integer-key branch, routes to `radix.lsd.parallel` when `p.size() >= PARALLEL_RADIX_CROSSOVER` and the
+  strategy is registered; otherwise sequential `radix.lsd` as before. The branch is placed **after** the
+  counting gate, so bounded-range integers still pick `counting`. New constant
+  `PARALLEL_RADIX_CROSSOVER = ParallelRadixSortStrategy.PARALLEL_THRESHOLD` (`1<<16`).
+
+- **`ParallelRadixSortStrategy.PARALLEL_THRESHOLD`** promoted `static` → `public static` so the selector can
+  pin the crossover to the strategy's own parallel-engage point (and so the existing javadoc `{@link}` in
+  `ParallelRadixSortTest` resolves). Below this point the strategy runs single-threaded == `radix.lsd`, so
+  routing there would be a no-op; at/above it the histogram/scatter passes fan out.
+
+- **Cost-model + bandit: intentionally NOT changed.** The cost model's comparisons+moves objective scores
+  `radix.lsd` and `radix.lsd.parallel` identically (same passes/moves, same `LINEAR` aux class), and its
+  `learned` ~5n arm already dominates radix's ~8n — so the cost model never selects `radix.lsd`, and a swap
+  there would be dead code. The bandit can't separate the two arms on metered cost either. The parallel win
+  is purely wall-clock, which only the rule-based size gate expresses. A wall-clock-aware cost is the seam if
+  that's ever wanted (noted in the ADR), out of scope until the JMH crossover is known.
+
+**Why provisional + why safe to ship now:** `radix.lsd.parallel` is byte-for-byte identical to sequential
+`radix.lsd` for any chunk count (deterministic + stable; proven by the prior 972/972 `PRadixCheck` fuzz), so
+routing to it changes only wall-clock, never the result. The crossover constant is flagged PROVISIONAL in the
+selector, the ADR, and PROGRESS; the **one remaining step is host-only**: run
+`./gradlew jmh -Pbench=ParallelRadixBenchmark` (JDK 22), record the numbers, and retune
+`PARALLEL_RADIX_CROSSOVER` upward if the measured profit crossover is higher than `1<<16`.
+
+**Tests:** four new `RuleBasedSelectorTest` cases — wide-range large integer → `radix.lsd.parallel`; exactly
+at the crossover → parallel; one element below → `radix.lsd`; large *bounded*-range → still `counting`.
+**Verification:** sandbox has no `javac`, so the decision logic was cross-checked by a faithful Python mirror
+of `smart()` (`mirror_rulebased_smart.py`): all 4 new + 4 non-keyed regression cases pass, plus a crossover
+sweep (n=16…1M) and a bounded-range sweep. Host `./gradlew build` (JDK 17 + CSRBT) is the compile/test gate.
+
+**Files touched:** `select/RuleBasedStrategySelector.java`, `strategy/ParallelRadixSortStrategy.java`
+(visibility only), `test/.../RuleBasedSelectorTest.java`, `docs/adr-phase2-offheap-sortbuffer.md`, `PROGRESS.md`.
+
+---
 
 ## Session 2026-06-21c — Phase 4 gate: metering bug, real gaps, ADR item 2 closed
 

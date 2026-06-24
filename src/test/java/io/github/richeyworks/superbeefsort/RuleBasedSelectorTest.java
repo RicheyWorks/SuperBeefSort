@@ -2,10 +2,12 @@ package io.github.richeyworks.superbeefsort;
 
 import io.github.richeyworks.superbeefsort.profile.DataProfile;
 import io.github.richeyworks.superbeefsort.profile.Distribution;
+import io.github.richeyworks.superbeefsort.profile.KeyStats;
 import io.github.richeyworks.superbeefsort.profile.ProfileDepth;
 import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
 import io.github.richeyworks.superbeefsort.select.RuleBasedStrategySelector;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
+import io.github.richeyworks.superbeefsort.strategy.ParallelRadixSortStrategy;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,6 +46,45 @@ class RuleBasedSelectorTest {
     void shortRunsAndNoKeysPicksIntrosort() {
         // not nearly sorted, longest run only 10%, no integer keys -> general comparison path
         assertEquals("intro", pick(profile(1000, 0.5, 100)));
+    }
+
+    // ---- SMART policy: large wide-range integer inputs route to the multi-threaded radix.lsd.parallel ----
+    // Provisional crossover == ParallelRadixSortStrategy.PARALLEL_THRESHOLD (pending the host JMH sweep);
+    // the parallel sort is byte-for-byte identical to sequential radix.lsd, so only wall-clock changes.
+
+    /** A wide-range integer-keyed profile (sortedness 0.5 so the run-aware/insertion branches don't fire). */
+    private static DataProfile profileKeyed(int n, KeyStats ks) {
+        return new DataProfile(n, 0.5, false, ProfileDepth.SHALLOW, n, ks, Distribution.UNKNOWN);
+    }
+
+    @Test
+    void largeWideRangeIntegerPicksParallelRadix() {
+        // range too wide for counting (span 2^30 > max(2^16, 4n)); n above the crossover -> parallel LSD radix
+        int n = 100_000;
+        assertEquals("radix.lsd.parallel", pick(profileKeyed(n, new KeyStats(0, 1L << 30, false))));
+    }
+
+    @Test
+    void exactlyAtCrossoverPicksParallelRadix() {
+        // n == the parallel engage threshold: the multi-threaded path begins exactly here
+        int n = ParallelRadixSortStrategy.PARALLEL_THRESHOLD;
+        assertEquals("radix.lsd.parallel", pick(profileKeyed(n, new KeyStats(0, 1L << 30, false))));
+    }
+
+    @Test
+    void justBelowCrossoverStaysSequentialRadix() {
+        // one element under the threshold: below it the parallel strategy would only run single-threaded,
+        // so the selector keeps sequential radix.lsd rather than pay pointless thread-setup overhead
+        int n = ParallelRadixSortStrategy.PARALLEL_THRESHOLD - 1;
+        assertEquals("radix.lsd", pick(profileKeyed(n, new KeyStats(0, 1L << 30, false))));
+    }
+
+    @Test
+    void largeBoundedRangeIntegerStillPicksCounting() {
+        // above the crossover but a bounded range (span <= max(2^16, 4n)): counting is O(n) and wins, so
+        // the new parallel-radix routing must not cannibalize the counting branch (it sits after it)
+        int n = 100_000;
+        assertEquals("counting", pick(profileKeyed(n, new KeyStats(0, 50_000, true))));
     }
 
     // ---- STABLE policy: prefers the in-place WikiSort for large, mostly-distinct inputs ----

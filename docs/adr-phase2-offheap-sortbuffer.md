@@ -181,6 +181,24 @@ disjoint-offset prefix → parallel scatter schedule, with the per-pass radix **
 parallel path** — exactly the cap this ADR found necessary to stop the `radix × chunks` matrix from eating
 the speedup. Its output is byte-for-byte identical to sequential `radix.lsd` for any chunk count
 (deterministic + stable), and the algorithm is fuzz-validated 972/972 (`PRadixCheck`, real `ForkJoinPool`:
-sorted order + permutation + stability over every shape/size/chunk-count). It is registered and tested but
-**not yet selector-routed** — a host JMH crossover measurement vs sequential `radix.lsd` gates that, per this
-ADR's "confirm with JMH before any integration claim". See PROGRESS.md.
+sorted order + permutation + stability over every shape/size/chunk-count).
+
+**Selector routing (2026-06-23, provisional).** `RuleBasedStrategySelector` (the engine default) now routes
+wide-range integer inputs under `SMART` to `radix.lsd.parallel` once `n >=` a crossover pinned to the
+strategy's own parallel-engage point (`ParallelRadixSortStrategy.PARALLEL_THRESHOLD = 1<<16`). The branch sits
+*after* the counting gate, so bounded-range integers still take `counting`; and below the crossover the
+parallel strategy would only run single-threaded (identical to `radix.lsd`), so routing there would be a no-op.
+Because the parallel sort is byte-for-byte identical to sequential `radix.lsd` for any chunk count, this changes
+only wall-clock, never results, so it is safe to ship ahead of the benchmark — but the constant is
+**provisional**: the `bench/ParallelRadixBenchmark` JMH sweep (added the same day; params n ∈ {50k, 100k, 500k,
+1M}, straddling the threshold) must be run on the host to locate the *true* profit crossover, and the constant
+retuned upward if it is higher than `1<<16`. Per this ADR's "confirm with JMH before any integration claim",
+the routing is in but flagged provisional, pending that measurement.
+
+The cost-model and bandit selectors are intentionally left **unchanged**: the cost model's comparisons+moves
+objective scores `radix.lsd` and `radix.lsd.parallel` identically (same passes/moves, same `LINEAR` aux class),
+and `learned`'s ~5n estimate already dominates radix's ~8n there, so the cost model never picks `radix.lsd` to
+begin with — a parallel swap would be dead code. The bandit likewise cannot separate the two arms on metered
+cost. The parallel advantage is purely wall-clock, which only the rule-based heuristic's size gate expresses.
+A wall-clock-aware cost (e.g. dividing radix passes by an effective parallelism) is the seam if cost-model/bandit
+routing is ever wanted, but it is out of scope until the JMH crossover is known. See PROGRESS.md.

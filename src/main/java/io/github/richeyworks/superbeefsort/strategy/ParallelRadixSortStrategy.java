@@ -56,8 +56,14 @@ public final class ParallelRadixSortStrategy<K> implements SortStrategy<K> {
 
     public static final StrategyId ID = StrategyId.of("radix.lsd.parallel");
 
-    /** Below this {@code n}, thread-coordination overhead outweighs the parallel gain — run single-threaded. */
-    static final int PARALLEL_THRESHOLD = 1 << 16; // 65_536
+    /**
+     * Below this {@code n}, thread-coordination overhead outweighs the parallel gain, so the strategy runs
+     * single-threaded — byte-for-byte identical to {@code radix.lsd}. Public so the selectors can reuse it as
+     * the provisional crossover for routing wide-range integer inputs to {@code radix.lsd.parallel}: routing
+     * below this point is pointless (the strategy would not actually fan out), and at/above it the threads
+     * engage. The true wall-clock profit crossover is to be confirmed by {@code bench/ParallelRadixBenchmark}.
+     */
+    public static final int PARALLEL_THRESHOLD = 1 << 16; // 65_536
 
     /** Smallest chunk worth handing to a thread; bounds the chunk count so chunks stay cache-friendly. */
     static final int MIN_CHUNK = 1 << 14; // 16_384

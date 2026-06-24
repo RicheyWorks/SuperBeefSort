@@ -202,3 +202,38 @@ begin with — a parallel swap would be dead code. The bandit likewise cannot se
 cost. The parallel advantage is purely wall-clock, which only the rule-based heuristic's size gate expresses.
 A wall-clock-aware cost (e.g. dividing radix passes by an effective parallelism) is the seam if cost-model/bandit
 routing is ever wanted, but it is out of scope until the JMH crossover is known. See PROGRESS.md.
+
+**JMH results (2026-06-23, host JDK 22.0.2, 1 fork, 3 warmup + 5 measurement × 2 s, random full-range `int`).**
+`bench/ParallelRadixBenchmark`, avg ms/op (99.9% CI half-width):
+
+| n | `radix.lsd` seq (ms) | `radix.lsd.parallel` (ms) | seq/par | seq rel.err | par rel.err | 99.9% CIs |
+|---|---|---|---|---|---|---|
+| 50,000 | 0.675 ± 0.010 | 0.598 ± 0.013 | 1.13× | 1% | 2% | separated |
+| 100,000 | 1.675 ± 1.105 | 1.412 ± 0.252 | 1.19× | 66% | 18% | **overlap** |
+| 500,000 | 8.168 ± 0.089 | 7.164 ± 0.523 | 1.14× | 1% | 7% | separated |
+| 1,000,000 | 27.948 ± 18.242 | 19.939 ± 15.169 | 1.40× | 65% | 76% | **overlap** |
+
+**Verdict — no statistically-significant parallel speedup was isolated; the crossover is *not* established by this
+run.** The reasoning:
+
+1. **The 50k row is a control, and it already shows a ~13% gap.** At n = 50,000 < `PARALLEL_THRESHOLD`,
+   `chunkCount` returns 1, so `radix.lsd.parallel` runs as a *single-chunk* sort — **no threads**. A 13%
+   "win" where parallelism is inactive is a **baseline offset** (a real implementation difference between the
+   two radix code paths, and/or run-order/system drift), not a parallel benefit.
+2. **After subtracting that baseline, parallelism adds almost nothing through 500k.** At 500k (the cleanest row,
+   both CIs tight) the 1.14× gap is essentially the same 1.13× baseline — parallelism itself contributes ≈1%.
+3. **The two rows that would show a large win (100k, 1M) are not significant** — their 99.9% CIs overlap, with
+   sequential relative error of 66% and 65% (the 1M variance is consistent with GC churn from rebuilding the
+   `SortBuffer`/boxed `Integer` list each op). The 1M point estimate (1.40×) only *hints* at a real
+   large-n benefit — and is consistent with this ADR's own native branch-B data (parity at 1M, +3% at 5M).
+4. **Structural confound:** the harness measured **all** `parallel` configs first, then **all** `sequential`
+   configs (`@Fork(1)`), so any drift over the 2-minute run aliases directly onto the seq-vs-par comparison —
+   exactly the bias the 50k control exposes. As JMH's own footer warns, *"do not assume the numbers tell you
+   what you want."*
+
+**Action:** `PARALLEL_RADIX_CROSSOVER` is **kept at `1<<16`** (unchanged) — the routing remains result-identical
+and harmless, but this run does not justify lowering it, and the only directional hint (1M) is not significant
+enough to raise it on. A **hardened re-run** is required before any retune: declare strategy as the
+fastest-varying `@Param` (so seq/par are measured back-to-back at each n, killing the order confound), raise to
+`@Fork(3..5)`, extend n to 2M/5M, and keep the 50k control row to quantify the residual baseline. Only then set
+the crossover to the n where `radix.lsd.parallel` beats `radix.lsd` by more than the measured baseline offset.

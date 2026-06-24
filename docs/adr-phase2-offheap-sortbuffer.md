@@ -274,11 +274,19 @@ equivalent loops.** Most plausible mechanism: `RadixSortStrategy` swaps the *sam
 per-pass locals (`srcK`/`dstK`, hoisted `cc`) that HotSpot optimises harder (loop-invariant array bases, no
 reload/alias hazard), plus a register-local `sum` accumulator in the prefix.
 
-**Recommendation: do NOT lower the crossover for this.** A 14% that rests on HotSpot's codegen of a particular
-loop shape is fragile — it may shrink or vanish on another JDK/CPU — so routing must rest on the robust
-*parallel* win, which the `1<<16` threshold already captures. The concrete, testable follow-up instead: refactor
-`RadixSortStrategy` to per-pass final source/dest locals + a local-accumulator prefix (a behaviour-preserving
-change already covered by `DifferentialTest`), then re-run `ParallelRadixBenchmark`; if the 50k control closes to
-~1.0×, `radix.lsd` itself got ~14% faster for free and `radix.lsd.parallel` reverts to a pure multicore
-specialist. Confirming the mechanism first would want a `-prof perfasm` pass. Tracked as a `radix.lsd`
-micro-optimisation; out of scope for this ADR.
+**Recommendation: do NOT lower the crossover for this — and the port-it-back idea was tested and rejected.**
+Routing must rest on the robust *parallel* win, which the `1<<16` threshold already captures. The testable
+follow-up — refactor `RadixSortStrategy` to per-pass final source/dest locals (the parallel path's structure) —
+**was implemented and benchmarked (2026-06-23), and did not work**: `radix.lsd`'s times were unchanged within
+noise and the 50k control ratio held at **1.13×** (before 1.136, after 1.128), nowhere near the predicted ~1.0×.
+The refactor was reverted. Two takeaways:
+
+1. The baseline gap is **not** the mutable-vs-final-locals difference. Its cause lies in the remaining
+   micro-differences (the `count[radix+1]`/`d+1` vs `count[radix]`/local-accumulator-prefix layout, or HotSpot's
+   treatment of the parallel path's lambda-extracted loop bodies) — but see (2).
+2. **The cross-run noise floor is ~±15–25%.** Between the two de-confounded runs the *unchanged* `par` code
+   drifted −26%…+14% per size — i.e. comparable to the 14% baseline itself. So the baseline is barely above the
+   run-to-run noise and is not worth chasing; confirming it would need `-prof perfasm` + many forks on a quiesced
+   machine, for a fragile gain that does not affect routing.
+
+**Closed — not pursued.** The crossover stays `1<<16`; `radix.lsd` is unchanged (refactor reverted).

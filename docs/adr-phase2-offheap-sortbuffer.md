@@ -233,7 +233,9 @@ run.** The reasoning:
 
 **Action:** `PARALLEL_RADIX_CROSSOVER` is **kept at `1<<16`** (unchanged) — the routing remains result-identical
 and harmless, but this run does not justify lowering it, and the only directional hint (1M) is not significant
-enough to raise it on. A **hardened re-run** is required before any retune: declare strategy as the
-fastest-varying `@Param` (so seq/par are measured back-to-back at each n, killing the order confound), raise to
-`@Fork(3..5)`, extend n to 2M/5M, and keep the 50k control row to quantify the residual baseline. Only then set
-the crossover to the n where `radix.lsd.parallel` beats `radix.lsd` by more than the measured baseline offset.
+enough to raise it on. A **hardened re-run** is required before any retune, and the benchmark has now been
+reworked for it (2026-06-23): the algorithm is a fastest-varying `@Param` so `seq`/`par` are measured
+back-to-back at each n (killing the order confound), the Gradle `jmh` fork count is raised 1→3, n is extended to
+2M/5M, and the 50k control row is kept to quantify the residual baseline. Re-run
+`gradlew jmh -Pbench=ParallelRadixBenchmark` and set the crossover to the smallest n where `radix.lsd.parallel`
+beats `radix.lsd` by **more than** that baseline offset (i.e. normalise each n's seq/par ratio by the 50k ratio).

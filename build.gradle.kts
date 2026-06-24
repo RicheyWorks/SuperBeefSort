@@ -68,7 +68,10 @@ tasks.test {
 // JMH rig (mirrors CSRBT's config). Benchmarks live in src/jmh/java. Run: ./gradlew jmh
 jmh {
     jmhVersion = "1.37"
-    fork = 1
+    // 3 forks (fresh JVMs) so the ParallelRadixBenchmark seq-vs-par crossover averages out per-fork JIT/layout
+    // luck, on top of its in-fork seq/par adjacency. Filtered runs (-Pbench=...) stay quick; the full unfiltered
+    // suite is ~3x longer at this setting -- drop back to 1 if you need the whole ~40 min suite fast.
+    fork = 3
     warmupIterations = 3
     iterations = 5
     resultFormat = "JSON"
@@ -88,6 +91,9 @@ jmh {
     }
     // Allow running despite a stale lock file (safe on a single-developer machine).
     jvmArgs.add("-Djmh.ignoreLock=true")
+    // Heap headroom for the large-n benchmarks (e.g. ParallelRadixBenchmark at 2M/5M) so GC churn from the
+    // per-op buffer allocation doesn't inflate measurement variance.
+    jvmArgs.add("-Xmx4g")
 }
 
 // Analytical report (not a wall-clock benchmark): prints the metered move/comparison growth curve for

@@ -262,10 +262,23 @@ to `radix.lsd.parallel` (already shipped). The crossover is kept at the engage t
 it, the raw win is already 1.21× and climbs fast — so there is no reason to raise it, and the routing tests are
 unchanged (behaviour is identical; only the crossover's *justification* moved from provisional to measured).
 
-**Secondary finding (follow-up, not acted on).** The 50k control — where the parallel strategy runs
-single-chunk, i.e. *no threads* — is itself a reliable ~14% faster than `radix.lsd` (tight, non-overlapping CIs
-in the de-confounded run). So `ParallelRadixSortStrategy`'s single-chunk path is a genuinely faster *sequential*
-radix than `RadixSortStrategy`, independent of parallelism. Two possible follow-ups, each pending a "why"
-investigation (the radix-bit plan / loop-structure difference) before acting: (a) lower the crossover so
-sub-threshold integer inputs also take the faster code; or (b) port the improvement back into
-`RadixSortStrategy` and keep `radix.lsd.parallel` purely for the multicore regime. Out of scope here.
+**Secondary finding — investigated (2026-06-23).** The 50k control (parallel strategy single-chunk ⇒ *no
+threads*) is a reliable ~14% faster than `radix.lsd`. A line-by-line comparison resolves the "why": the two
+single-chunk paths are **algorithmically identical** — same `RadixPlan` (`radix.lsd` reads `plan.passes()`; the
+parallel path recomputes `ceil(significantBits/bits)`, but `RadixPlan.forWidth` *defines* `passes` as exactly
+that and `radix` as `1<<bitsPerPass`, so bits, passes and radix all match), both run their passes on primitive
+`long[]`/`Object[]` (neither touches the metered `SortBuffer` in the hot loop), and both use the same
+histogram → prefix → scatter. **So the gap is not algorithmic — it is JIT codegen of two textually-different but
+equivalent loops.** Most plausible mechanism: `RadixSortStrategy` swaps the *same* mutable locals
+(`keys`/`tmpKeys`, reused `count`) across passes, whereas the parallel path binds *fresh effectively-final*
+per-pass locals (`srcK`/`dstK`, hoisted `cc`) that HotSpot optimises harder (loop-invariant array bases, no
+reload/alias hazard), plus a register-local `sum` accumulator in the prefix.
+
+**Recommendation: do NOT lower the crossover for this.** A 14% that rests on HotSpot's codegen of a particular
+loop shape is fragile — it may shrink or vanish on another JDK/CPU — so routing must rest on the robust
+*parallel* win, which the `1<<16` threshold already captures. The concrete, testable follow-up instead: refactor
+`RadixSortStrategy` to per-pass final source/dest locals + a local-accumulator prefix (a behaviour-preserving
+change already covered by `DifferentialTest`), then re-run `ParallelRadixBenchmark`; if the 50k control closes to
+~1.0×, `radix.lsd` itself got ~14% faster for free and `radix.lsd.parallel` reverts to a pure multicore
+specialist. Confirming the mechanism first would want a `-prof perfasm` pass. Tracked as a `radix.lsd`
+micro-optimisation; out of scope for this ADR.

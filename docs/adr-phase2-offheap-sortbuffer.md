@@ -239,3 +239,33 @@ back-to-back at each n (killing the order confound), the Gradle `jmh` fork count
 2M/5M, and the 50k control row is kept to quantify the residual baseline. Re-run
 `gradlew jmh -Pbench=ParallelRadixBenchmark` and set the crossover to the smallest n where `radix.lsd.parallel`
 beats `radix.lsd` by **more than** that baseline offset (i.e. normalise each n's seq/par ratio by the 50k ratio).
+
+**Hardened re-run results (2026-06-23, host JDK 22.0.2, 3 forks × (3 warmup + 5 measurement) × 2 s, `-Xmx4g`,
+random full-range `int`, `seq`/`par` measured back-to-back per n). Every row is significant (non-overlapping
+99.9% CIs):**
+
+| n | `radix.lsd` seq (ms) | `radix.lsd.parallel` (ms) | raw speedup | true-parallel (÷ 50k baseline) |
+|---|---|---|---|---|
+| 50,000 *(control, no threads)* | 0.685 ± 0.008 | 0.603 ± 0.008 | 1.14× | 1.00× |
+| 100,000 | 1.649 ± 0.069 | 1.364 ± 0.036 | 1.21× | 1.06× |
+| 500,000 | 15.737 ± 1.430 | 8.909 ± 0.429 | 1.77× | 1.55× |
+| 1,000,000 | 25.510 ± 0.596 | 14.856 ± 0.467 | 1.72× | 1.51× |
+| 2,000,000 | 69.209 ± 8.422 | 32.136 ± 2.202 | 2.15× | 1.90× |
+| 5,000,000 | 184.137 ± 12.344 | 70.496 ± 5.853 | 2.61× | 2.30× |
+
+**Final verdict — routing validated; `PARALLEL_RADIX_CROSSOVER` stays `1<<16`.** De-confounding flipped the
+result: `radix.lsd.parallel` is significantly faster than `radix.lsd` at *every* size, the raw win growing
+1.21× → 2.61× from 100k to 5M, and the thread-only contribution (after netting the ~14% 50k baseline) growing
+1.06× → 2.30×. The earlier "inconclusive" read above was entirely the run-order artifact the first harness
+suffered (all-`par`-then-all-`seq`, 1 fork). **Phase 2 item 7 closes positive**: integer inputs ≥ `1<<16` route
+to `radix.lsd.parallel` (already shipped). The crossover is kept at the engage threshold — at 100k, just above
+it, the raw win is already 1.21× and climbs fast — so there is no reason to raise it, and the routing tests are
+unchanged (behaviour is identical; only the crossover's *justification* moved from provisional to measured).
+
+**Secondary finding (follow-up, not acted on).** The 50k control — where the parallel strategy runs
+single-chunk, i.e. *no threads* — is itself a reliable ~14% faster than `radix.lsd` (tight, non-overlapping CIs
+in the de-confounded run). So `ParallelRadixSortStrategy`'s single-chunk path is a genuinely faster *sequential*
+radix than `RadixSortStrategy`, independent of parallelism. Two possible follow-ups, each pending a "why"
+investigation (the radix-bit plan / loop-structure difference) before acting: (a) lower the crossover so
+sub-threshold integer inputs also take the faster code; or (b) port the improvement back into
+`RadixSortStrategy` and keep `radix.lsd.parallel` purely for the multicore regime. Out of scope here.

@@ -59,9 +59,11 @@ public final class ParallelRadixSortStrategy<K> implements SortStrategy<K> {
     /**
      * Below this {@code n}, thread-coordination overhead outweighs the parallel gain, so the strategy runs
      * single-threaded — byte-for-byte identical to {@code radix.lsd}. Public so the selectors can reuse it as
-     * the provisional crossover for routing wide-range integer inputs to {@code radix.lsd.parallel}: routing
-     * below this point is pointless (the strategy would not actually fan out), and at/above it the threads
-     * engage. The true wall-clock profit crossover is to be confirmed by {@code bench/ParallelRadixBenchmark}.
+     * the crossover for routing wide-range integer inputs to {@code radix.lsd.parallel}: routing below this
+     * point is pointless (the strategy would not actually fan out), and at/above it the threads engage.
+     * Confirmed by {@code bench/ParallelRadixBenchmark} (de-confounded 3-fork run, 2026-06-23):
+     * {@code radix.lsd.parallel} is significantly faster than {@code radix.lsd} at every {@code n} &gt;= this
+     * threshold (1.21&times; at 100k rising to 2.61&times; at 5M).
      */
     public static final int PARALLEL_THRESHOLD = 1 << 16; // 65_536
 

@@ -28,14 +28,15 @@ import io.github.richeyworks.superbeefsort.strategy.WikiSortStrategy;
 public final class RuleBasedStrategySelector implements StrategySelector {
 
     private static final long COUNTING_RANGE_FLOOR = 1L << 16;
-    // PROVISIONAL SMART crossover for routing wide-range integer inputs to the multi-threaded
-    // radix.lsd.parallel instead of the sequential radix.lsd. Pinned to the parallel strategy's own
-    // engage point: below it that strategy runs single-threaded (output identical to radix.lsd), so
-    // routing there would be a no-op; at/above it the histogram/scatter passes actually fan out across
-    // cores. radix.lsd.parallel is byte-for-byte deterministic + stable, so this changes only wall-clock,
-    // never results. The TRUE profit crossover is to be measured by the host JMH sweep
-    // (bench/ParallelRadixBenchmark); raise this constant if the measured crossover is higher.
-    // PENDING JMH CONFIRMATION.
+    // SMART crossover for routing wide-range integer inputs to the multi-threaded radix.lsd.parallel instead
+    // of the sequential radix.lsd. Pinned to the parallel strategy's own engage point: below it that strategy
+    // runs single-threaded (output identical to radix.lsd), so routing there would be a no-op; at/above it the
+    // histogram/scatter passes fan out across cores. radix.lsd.parallel is byte-for-byte deterministic +
+    // stable, so this only ever changes wall-clock, never results.
+    // VALIDATED by bench/ParallelRadixBenchmark (de-confounded 3-fork run, 2026-06-23, JDK 22, full-range int):
+    // radix.lsd.parallel is significantly faster than radix.lsd at every n >= this threshold -- 1.21x at 100k
+    // rising to 2.61x at 5M (1.06x -> 2.30x after netting out a ~14% non-parallel baseline offset, measured by
+    // the sub-threshold 50k control). See docs/adr-phase2-offheap-sortbuffer.md.
     private static final int PARALLEL_RADIX_CROSSOVER = ParallelRadixSortStrategy.PARALLEL_THRESHOLD;
     // WikiSort is ~2-3x slower than plain merge in wall-clock at every size (a higher comparison
     // constant), so it is only worth choosing when merge's O(n) scratch is genuinely prohibitive. Express

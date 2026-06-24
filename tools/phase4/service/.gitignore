@@ -1,0 +1,6 @@
+# generated gRPC stubs (regenerate with ./gen.sh)
+sbs_intelligence_pb2.py
+sbs_intelligence_pb2_grpc.py
+__pycache__/
+# runtime observation corpus
+*.jsonl

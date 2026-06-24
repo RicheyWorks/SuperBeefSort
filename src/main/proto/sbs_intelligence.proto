@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package sbs.intelligence.v1;
+
+option java_package = "io.github.richeyworks.superbeefsort.intelligence.grpc";
+option java_multiple_files = true;
+
+// SbsIntelligence — the optional Phase 4b learned-selection service (ADR docs/adr-phase4-python-intelligence.md
+// action item 6). The Java RemoteStrategySelector calls Predict (behind a size gate + circuit breaker) and
+// fire-and-forget Observe; the engine NEVER depends on it — any error/timeout falls back to the local selector.
+service SbsIntelligence {
+  rpc Predict (PredictRequest) returns (PredictResponse);
+  rpc Observe (ObserveRequest) returns (ObserveResponse);
+}
+
+// Raw DataProfile fields (mirrors io.github.richeyworks.superbeefsort.profile.DataProfile). The SERVER derives
+// the model's feature vector from these (one source of truth = tools/phase4 gen_corpus.features), so the Java
+// client never replicates the derived-feature math — keeping training and serving in feature lockstep.
+message DataProfile {
+  int64  size              = 1;
+  double sortedness_ratio  = 2;
+  bool   has_duplicates    = 3;
+  int64  distinct_estimate = 4;
+  bool   has_key_stats     = 5;
+  int64  key_span          = 6;  // meaningful only when has_key_stats
+  bool   counting_feasible = 7;
+  int32  distribution_ord  = 8;  // UNKNOWN=0 UNIFORM=1 SKEWED=2 CLUSTERED=3
+  int32  longest_run       = 9;
+  int64  inversions        = 10; // -1 when unmeasured
+  bool   inversions_exact  = 11;
+  bool   has_byte_key      = 12;
+}
+
+message PredictRequest {
+  DataProfile profile = 1;
+  string policy = 2;  // SMART | STABLE | FIXED_INTRO (server advises SMART only)
+}
+
+message PredictResponse {
+  string strategy_id   = 1;  // e.g. "counting"; empty => no advice, client keeps its delegate
+  double confidence    = 2;  // [0,1]
+  string model_version = 3;  // for observability / hot-swap visibility
+}
+
+message SortOutcome {
+  int64 comparisons    = 1;
+  int64 moves          = 2;
+  int64 elapsed_nanos  = 3;
+  int64 peak_aux_bytes = 4;
+}
+
+message ObserveRequest {
+  DataProfile profile         = 1;
+  string      chosen_strategy = 2;
+  SortOutcome outcome         = 3;
+}
+
+message ObserveResponse {
+  bool  accepted    = 1;
+  int64 corpus_size = 2;  // rows accumulated for continual retrain
+}

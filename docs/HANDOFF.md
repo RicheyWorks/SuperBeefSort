@@ -6,6 +6,45 @@ integration deferred (item 7). Phase 4 gate measured: real exploitable gaps foun
 items 3-5 open. Phase 5 external merge sort + typed step-event stream done.**
 Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
 
+## Session 2026-06-23b — Phase 2 item 7 closed (JMH-validated); 14% side-quest rejected; Phase 4b started
+
+Continued from 2026-06-23 (below). Three things happened.
+
+**1. `radix.lsd.parallel` routing JMH-validated — Phase 2 item 7 closes positive.** The first
+`ParallelRadixBenchmark` run read *inconclusive*, but it was **confounded**: two separate `@Benchmark` methods
+meant JMH measured all-`par`-then-all-`seq` under `@Fork(1)`, so machine drift aliased onto the gap — exposed
+by a 50k *control* (sub-threshold ⇒ single chunk ⇒ no threads) that still showed ~14%. Hardened the benchmark
+(algorithm as a fastest-varying `@Param` ⇒ `seq`/`par` back-to-back per n; `@Fork(3)`; n→2M/5M; kept the 50k
+control; `-Xmx4g`). The de-confounded re-run is decisive and all-significant: `radix.lsd.parallel` is faster at
+every n — raw 1.2×@100k → 2.6×@5M (1.06×→2.30× thread-only after the baseline). **`PARALLEL_RADIX_CROSSOVER`
+stays `1<<16`** (validated, not retuned); routing tests unchanged. Full tables in
+`docs/adr-phase2-offheap-sortbuffer.md` ("JMH results" + "Hardened re-run results").
+
+**2. The 14% sub-threshold baseline — investigated, refactor tested & rejected.** Code comparison showed the two
+single-chunk paths do *identical* work (same `RadixPlan`, primitive-array passes, histogram→prefix→scatter), so
+the gap is JIT codegen, not algorithmic. Hypothesis: `RadixSortStrategy` reuses swapped mutable locals vs the
+parallel path's fresh per-pass `final` locals. Implemented that refactor (behaviour-preserving) and
+re-benchmarked — **it did not move the gap** (50k control held 1.13×; seq unchanged within noise). The unchanged
+`par` code drifted −26%…+14% between runs, i.e. the run-to-run noise floor (~±15–25%) is comparable to the gap
+itself. **Reverted; `radix.lsd` is unchanged.** Lesson recorded in the ADR "secondary finding".
+
+**3. Phase 4b started — `SbsIntelligence` gRPC server built + verified.** The optional runtime learned-selection
+service (ADR item 6). Proto `src/main/proto/sbs_intelligence.proto` (`Predict`/`Observe`; the client sends the
+**raw** `DataProfile`, the server derives the 15 features so derivation lives in one place). Python server
+`tools/phase4/service/server.py` serves the schema-v1 flat tree (walks it identically to Java `SelectorModel`,
+`SMART`-only advice) and appends the observe stream to `observations.jsonl`. **Verified in-sandbox**
+(`smoke_test.py`): 72/72 `Predict` parity vs an independent unrounded oracle (4 sizes × 9 shapes × 2 key modes),
+plus Observe + non-SMART. **Next (host-built):** Java `RemoteStrategySelector` (size gate + circuit breaker +
+local fallback) + grpc build wiring (protobuf gradle plugin + grpc-java), then the retrain/hot-swap loop.
+Design in `tools/phase4/service/README.md`.
+
+**Sandbox caveats this session:** the bash mount served stale/truncated views of Edit-tool-written files (the
+host files were correct — verified via the Read tool and the host `gradlew build`), and a stray `.git/index.lock`
+had to be cleared via the file-delete permission; commits were done on the host. JDK 17/CSRBT build + JMH all
+run host-side.
+
+---
+
 ## Session 2026-06-23 — Phase 2 item 7(b): provisional SMART routing for `radix.lsd.parallel`
 
 Continued from the previous session, which added the `bench/ParallelRadixBenchmark` JMH crossover sweep

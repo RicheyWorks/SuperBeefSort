@@ -1,7 +1,9 @@
 # ADR: Phase 4 — learned strategy selection (SbsIntelligence)
 
-**Status:** Done (all five action items closed — corpus logged, gaps measured, model trained + exported,
-in-process `LearnedModelStrategySelector` built, in-JVM JMH confirms inference is free past the size gate)
+**Status:** Phase 4a Done (action items 1–5 — corpus logged, gaps measured, model trained + exported,
+in-process `LearnedModelStrategySelector` built, in-JVM JMH confirms inference is free past the size gate).
+Phase 4b In Progress (item 6 — the gRPC `SbsIntelligence` server is built + verified in-sandbox; the Java
+`RemoteStrategySelector` client + build wiring are next).
 **Date:** 2026-06-20 (items 3-4 added 2026-06-21)
 **Deciders:** Richmond (project owner)
 **Related:** `docs/HANDOFF.md` (Phase 4 roadmap), `select/StrategySelector` + `select/LearningStrategySelector` (the seams), `select/BanditStrategySelector` (the in-process learned baseline), `select/CostModelStrategySelector` (the analytic baseline / prior source), `profile/DataProfile` (the feature vector), `core/SortResult` (the label)
@@ -269,8 +271,23 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
 
    Run: `./gradlew jmh -Pbench=SelectorInferenceLatencyBenchmark` (select-only) or
    `-Pbench=SelectorBenchmark` (profile+select + full-sort groups).
-6. [ ] **(Only if needed) Phase 4b:** `SbsIntelligence` gRPC service + `RemoteStrategySelector` with size gate
-   + circuit breaker + local fallback, for continual/fleet-wide learning.
+6. [~] **Phase 4b — in progress (2026-06-23):** `SbsIntelligence` gRPC service + `RemoteStrategySelector` with
+   size gate + circuit breaker + local fallback, for continual/fleet-wide learning.
+   - **Proto contract** `src/main/proto/sbs_intelligence.proto`:
+     `Predict(DataProfile, policy) -> (strategy_id, confidence, model_version)` and
+     `Observe(DataProfile, chosen, outcome) -> (accepted, corpus_size)`. The client sends the **raw**
+     `DataProfile` fields and the **server** derives the 15-feature model vector
+     (= `gen_corpus.features` / `LearnedModelStrategySelector.featureValue`), so derivation lives in exactly one
+     place — closing the networked feature-parity risk this ADR flagged.
+   - **Python server** `tools/phase4/service/server.py`: loads the schema-v1 flat tree
+     (`sbs_selector_model.txt`), walks it identically to Java `SelectorModel.predict`, advises under `SMART`
+     only, and appends the `observe` stream to `observations.jsonl` (the continual-retrain corpus).
+     **Verified in-sandbox** by `smoke_test.py`: **72/72 `Predict` parity** vs an independent unrounded oracle
+     across 4 sizes × 9 shapes × 2 key modes (all four classes), plus the Observe + non-SMART paths.
+   - **Next (host-built):** the Java `RemoteStrategySelector` — mirrors `LearnedModelStrategySelector` gating
+     plus a deadline + circuit breaker that falls back to the local delegate (`Observe` fire-and-forget) — and
+     the build wiring (protobuf gradle plugin + grpc-java deps). Then the retrain/hot-swap loop. Design + run
+     docs in `tools/phase4/service/README.md`.
 
 **Done-well metric:** a learned selector that **measurably beats `BanditStrategySelector`** on held-out
 workloads, while a missing/slow/disabled model leaves selection byte-for-byte the cost-model path it is today.

@@ -118,22 +118,40 @@ public final class CsrbtTarget<K> {
         return healing == null || healing.selfRepair();
     }
 
-    /** True when the target supports a bounded sliding window ({@code setMaxSize}); i.e. it is an {@link OrderedSet}. */
+    /**
+     * True when the target supports a bounded sliding window ({@code setMaxSize}): an
+     * {@link OrderedSet}, or — since CSRBT's 2026-07-08 window seam — an {@link EnsembleOrderedSet}
+     * whose members are all strategy-backed (an engine-tier member has no window, and CSRBT
+     * refuses a half-windowed ensemble rather than letting it silently diverge).
+     */
     public boolean supportsWindow() {
-        return orderedSet != null;
+        return orderedSet != null || (ensemble != null && ensemble.supportsWindow());
     }
 
-    /** Bound the target to a sliding window of {@code n} (0 = unbounded); CSRBT FIFO-evicts oldest-inserted keys. */
+    /**
+     * Bound the target to a sliding window of {@code n} (0 = unbounded); CSRBT FIFO-evicts
+     * oldest-inserted keys — fanned uniformly across members for an ensemble target.
+     */
     public void setMaxSize(int n) {
-        if (orderedSet == null) {
-            throw new IllegalStateException("setMaxSize requires an OrderedSet target");
+        if (orderedSet != null) {
+            orderedSet.setMaxSize(n);
+            return;
         }
-        orderedSet.setMaxSize(n);
+        if (ensemble != null && ensemble.supportsWindow()) {
+            ensemble.setMaxSize(n);
+            return;
+        }
+        throw new IllegalStateException(
+                "setMaxSize requires a windowed target: an OrderedSet, or an ensemble whose "
+                + "members are all strategy-backed");
     }
 
-    /** The target's current window capacity, or {@code 0} when unbounded / not an OrderedSet. */
+    /** The target's current window capacity, or {@code 0} when unbounded / windowless. */
     public int getMaxSize() {
-        return orderedSet == null ? 0 : orderedSet.getMaxSize();
+        if (orderedSet != null) {
+            return orderedSet.getMaxSize();
+        }
+        return (ensemble != null && ensemble.supportsWindow()) ? ensemble.getMaxSize() : 0;
     }
 
     /** True when an O(n) bulk build is possible: the target is an {@link OrderedSet} and currently empty. */

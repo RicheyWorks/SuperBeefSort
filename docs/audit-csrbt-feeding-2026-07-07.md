@@ -131,9 +131,12 @@ Tests: `FeedingSeamsTest`, `EvolutionFeedTest` (SuperBeefSort), `RotationDepthSe
 None were built in this session (sandbox is JRE 11; both repos need JDK 17+) — run `gradlew build`
 host-side, CSRBT first (SuperBeefSort composes it as a sibling).
 
-**Still open:** Gap 12 (persistence handoff, `NavigableOrderedSet` return flavor) — adoption features;
-and the two CSRBT-side follow-ups noted in `CSRBT/docs/CHANGELOG-2026-07-07-workload-signal-seam.md`
-(ensemble-read depth, windowed ensembles).
+**All closed (2026-07-08):** Gap 12 landed as `buildNavigableSet()` + `buildOrderedSetPersisted(...)`,
+and both CSRBT-side follow-ups landed per `CSRBT/docs/CHANGELOG-2026-07-08-ensemble-window-depth.md` —
+ensemble reads now record real search depths where a single authoritative walk exists (never voted),
+and all-strategy ensembles support the sliding window, so bounded streaming/external feeds can target
+them (`CsrbtTarget` routes the window; the loud rejection now fires only for genuinely windowless
+mixes, e.g. `withSnapshot()`).
 
 ## 5. Verification notes
 

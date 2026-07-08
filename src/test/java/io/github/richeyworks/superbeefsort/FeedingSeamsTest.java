@@ -79,13 +79,31 @@ class FeedingSeamsTest {
 
     @Test
     void boundedStreamingIntoWindowlessTargetFailsLoudly() {
+        // withSnapshot() adds an engine-tier member, which has no sliding window — so this
+        // ensemble is genuinely windowless even after CSRBT's 2026-07-08 ensemble-window seam.
         EnsembleOrderedSet<Integer> ensemble = EnsembleTargetFactory.forProfile(
-                null, AccessPolicy.BALANCED, Comparator.<Integer>naturalOrder(), EnsembleSpec.lean());
+                null, AccessPolicy.BALANCED, Comparator.<Integer>naturalOrder(),
+                EnsembleSpec.lean().withSnapshot());
         CsrbtTarget<Integer> target = CsrbtTarget.of(ensemble);
 
         assertThrows(IllegalArgumentException.class,
                 () -> new StreamingFeeder<Integer>(10).feed(ascending(100), target),
                 "a bounded stream into a windowless target must not silently run unbounded");
+        ensemble.close();
+    }
+
+    @Test
+    void boundedStreamingIntoAllStrategyEnsembleWindowsUniformly() {
+        // The follow-up the loud failure pointed at, now closed: an all-strategy-member ensemble
+        // supports the window, so a bounded stream converges every mirror to the same top-N.
+        EnsembleOrderedSet<Integer> ensemble = EnsembleTargetFactory.forProfile(
+                null, AccessPolicy.BALANCED, Comparator.<Integer>naturalOrder(), EnsembleSpec.lean());
+        new StreamingFeeder<Integer>(10).feed(ascending(100), CsrbtTarget.of(ensemble));
+
+        assertEquals(10, ensemble.size(), "window bound holds across the ensemble");
+        assertEquals(90, ensemble.minimum().intValue(), "converged to the largest 10 distinct keys");
+        assertEquals(99, ensemble.maximum().intValue());
+        ensemble.close();
     }
 
     @Test

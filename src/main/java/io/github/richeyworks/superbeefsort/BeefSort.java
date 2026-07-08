@@ -1,6 +1,7 @@
 package io.github.richeyworks.superbeefsort;
 
 import io.github.richeyworks.csrbt.OrderedSet;
+import io.github.richeyworks.csrbt.TreeNode1;
 import io.github.richeyworks.csrbt.control.MorphPolicy;
 import io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet;
 import io.github.richeyworks.csrbt.strategy.TreeStrategy;
@@ -14,8 +15,10 @@ import io.github.richeyworks.superbeefsort.csrbt.AccessPolicy;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleAdaptation;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleSpec;
 import io.github.richeyworks.superbeefsort.csrbt.EnsembleTargetFactory;
+import io.github.richeyworks.superbeefsort.csrbt.EvolutionAdaptation;
 import io.github.richeyworks.superbeefsort.csrbt.ProfileGuidedScorer;
 import io.github.richeyworks.superbeefsort.csrbt.StrategyAdvisor;
+import io.github.richeyworks.superbeefsort.csrbt.TreeEventBridge;
 import io.github.richeyworks.superbeefsort.csrbt.WorkloadAdaptation;
 import io.github.richeyworks.superbeefsort.engine.BeefSortEngine;
 import io.github.richeyworks.superbeefsort.engine.JobSpec;
@@ -78,6 +81,7 @@ public final class BeefSort<K> {
     private Supplier<? extends TreeStrategy<K>> targetStrategy; // null -> StrategyAdvisor decides
     private HealthPolicy healthPolicy = HealthPolicy.defaults(); // streaming batch size + self-heal cadence
     private StepEventSink stepEventSink; // null -> step events disabled (default)
+    private TreeNode1.Augmentor<K> augmentor; // null -> CSRBT's default subtree-size augmentation
 
     private BeefSort(Comparator<? super K> comparator) {
         this.comparator = comparator;
@@ -193,7 +197,36 @@ public final class BeefSort<K> {
         TreeStrategy<K> strategy = (targetStrategy != null)
                 ? targetStrategy.get()
                 : StrategyAdvisor.advise(run.profile(), accessPolicy);
-        return OrderedSet.fromSorted(distinct, strategy, comparator);
+        return finishSet(OrderedSet.fromSorted(distinct, strategy, comparator));
+    }
+
+    /**
+     * Install a CSRBT per-node {@linkplain TreeNode1.Augmentor augmentor} on every {@code build*()}
+     * OrderedSet target, so the tree is <em>born augmented</em> (e.g. interval max-hi via CSRBT's
+     * {@code IntervalAugmentor}): the O(n) bulk build plus one re-augment pass, instead of the caller
+     * retro-fitting augmentation onto a built set. Augmented data survives CSRBT morphs/self-repairs
+     * (per-node tags carry across). {@code null} keeps CSRBT's default subtree-size augmentation.
+     */
+    public BeefSort<K> augmentor(TreeNode1.Augmentor<K> a) {
+        this.augmentor = a;
+        return this;
+    }
+
+    /**
+     * Post-construction wiring every built {@link OrderedSet} gets: the declared {@link #augmentor},
+     * and — when an {@link #observe observer} is registered — a {@link TreeEventBridge} so CSRBT's
+     * structured adaptation events (morph/evict/repair/…) speak on the same stream as the sort's
+     * lifecycle events. With no observer the listener stays unset and CSRBT's write path remains
+     * allocation-free for events.
+     */
+    private OrderedSet<K> finishSet(OrderedSet<K> set) {
+        if (augmentor != null) {
+            set.setAugmentor(augmentor);
+        }
+        if (observer != SortObserver.NOOP) {
+            set.setEventListener(TreeEventBridge.lifecycle(observer));
+        }
+        return set;
     }
 
     /**
@@ -214,6 +247,9 @@ public final class BeefSort<K> {
         SortRunResult<K> run = engine().sort(source, comparator, spec());
         EnsembleOrderedSet<K> ensemble =
                 EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator, ensembleSpec);
+        if (observer != SortObserver.NOOP) {
+            ensemble.setEventListener(TreeEventBridge.lifecycle(observer));
+        }
         new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
         return ensemble;
     }
@@ -229,9 +265,21 @@ public final class BeefSort<K> {
         return buildAdaptiveEnsemble(EnsembleSpec.adaptive(), policy);
     }
 
-    /** As {@link #buildAdaptiveEnsemble(MorphPolicy)} but with an explicit {@link EnsembleSpec} member mix. */
+    /**
+     * As {@link #buildAdaptiveEnsemble(MorphPolicy)} but with an explicit {@link EnsembleSpec} member mix.
+     * The adaptation is attached <em>before</em> the bulk feed and the feed is routed through its monitor
+     * ({@code CsrbtTarget.observedBy}), so the load itself is the first workload the promotion scorer sees.
+     */
     public EnsembleAdaptation<K> buildAdaptiveEnsemble(EnsembleSpec ensembleSpec, MorphPolicy policy) {
-        return EnsembleAdaptation.attach(buildEnsemble(ensembleSpec), policy);
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        EnsembleOrderedSet<K> ensemble =
+                EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator, ensembleSpec);
+        if (observer != SortObserver.NOOP) {
+            ensemble.setEventListener(TreeEventBridge.lifecycle(observer));
+        }
+        EnsembleAdaptation<K> adaptation = EnsembleAdaptation.attach(ensemble, policy);
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble).observedBy(adaptation.monitor()));
+        return adaptation;
     }
 
     /**
@@ -252,8 +300,66 @@ public final class BeefSort<K> {
         SortRunResult<K> run = engine().sort(source, comparator, spec());
         EnsembleOrderedSet<K> ensemble =
                 EnsembleTargetFactory.forProfile(run.profile(), accessPolicy, comparator, ensembleSpec);
-        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble));
-        return EnsembleAdaptation.attachProfileGuided(ensemble, run.profile(), accessPolicy, run.sortMetrics(), policy);
+        if (observer != SortObserver.NOOP) {
+            ensemble.setEventListener(TreeEventBridge.lifecycle(observer));
+        }
+        EnsembleAdaptation<K> adaptation =
+                EnsembleAdaptation.attachProfileGuided(ensemble, run.profile(), accessPolicy, run.sortMetrics(), policy);
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(ensemble).observedBy(adaptation.monitor()));
+        return adaptation;
+    }
+
+    /**
+     * The third adaptation tier — feed CSRBT's <em>evolution machine</em> (ADR-011 V3): sort, build an
+     * evolution host (access-advised primary on the throne + one Red-Black laboratory member), bulk-load
+     * every member in O(n), route the feed into the evolution monitor as cycle-0 evidence, and return an
+     * {@link EvolutionAdaptation} whose UCB1 bandit trials verified-box {@code WB(Δ,Γ)} genomes live on
+     * the laboratory — gate-killed when unsound, promoted through the {@link MorphPolicy} gates when
+     * proven. Drive it caller-cadenced: traffic through the adaptation, {@code beginCycle()} /
+     * {@code endCycle()} per window; {@code observeWith(observer)} streams the Trial events. See
+     * {@link EvolutionAdaptation}'s honesty clause: this tier is selection made observable, not a
+     * promised speedup.
+     */
+    public EvolutionAdaptation<K> buildEvolvingEnsemble(MorphPolicy morphPolicy) {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        EnsembleOrderedSet<K> host = EnsembleTargetFactory.evolutionHost(
+                run.profile(), accessPolicy, comparator, 1, false);   // MIRROR: O(n)/member bulk load
+        if (observer != SortObserver.NOOP) {
+            host.setEventListener(TreeEventBridge.lifecycle(observer));
+        }
+        EvolutionAdaptation<K> evolution = EvolutionAdaptation.banditSearch(host, morphPolicy);
+        if (observer != SortObserver.NOOP) {
+            evolution.observeWith(observer);   // Trial arms/phases/costs on the same stream
+        }
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(host).observedBy(evolution.monitor()));
+        return evolution;
+    }
+
+    /**
+     * As {@link #buildEvolvingEnsemble(MorphPolicy)} but the full (μ+λ) machine (ADR-011 V4): a nursery
+     * of {@code lambda} laboratory members carrying exact shadows (CSRBT's canonical evolution setup —
+     * every write reaches the nursery, reads never fan out to it), {@code founders} bred with bounded
+     * in-box mutation and blend, μ survivors per generation, deaths and births on the record
+     * ({@code Lineage}/{@code Trial}/{@code Diversity} via {@code observeWith}). Shadow mode means the
+     * load feeds median-first rather than O(n)-bulk — the feeders detect that automatically. Use
+     * {@link EvolutionAdaptation#defaultFounders()} when you have no opinion; {@code founders.size()}
+     * must fit {@code lambda}.
+     */
+    public EvolutionAdaptation<K> buildEvolvingEnsemble(MorphPolicy morphPolicy, List<io.github.richeyworks.csrbt.evolution.PolicyGenome> founders,
+                                                        int mu, int lambda, long seed) {
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        EnsembleOrderedSet<K> host = EnsembleTargetFactory.evolutionHost(
+                run.profile(), accessPolicy, comparator, lambda, true);   // exact shadows: the nursery
+        if (observer != SortObserver.NOOP) {
+            host.setEventListener(TreeEventBridge.lifecycle(observer));
+        }
+        EvolutionAdaptation<K> evolution =
+                EvolutionAdaptation.population(host, morphPolicy, founders, mu, false, seed);
+        if (observer != SortObserver.NOOP) {
+            evolution.observeWith(observer);
+        }
+        new ParallelFeeder<K>().feed(run.sorted(), CsrbtTarget.of(host).observedBy(evolution.monitor()));
+        return evolution;
     }
 
     /**
@@ -264,7 +370,15 @@ public final class BeefSort<K> {
      * to a morph-managed strategy (BALANCED/READ_HEAVY/SKEWED, or an RB/AVL/Splay/Hybrid targetStrategy).
      */
     public WorkloadAdaptation<K> buildAdaptive(MorphPolicy policy) {
-        return WorkloadAdaptation.attach(buildOrderedSet(), policy);
+        SortRunResult<K> run = engine().sort(source, comparator, spec());
+        List<K> distinct = distinct(run.sorted());
+        TreeStrategy<K> strategy = (targetStrategy != null)
+                ? targetStrategy.get()
+                : StrategyAdvisor.advise(run.profile(), accessPolicy);
+        OrderedSet<K> set = finishSet(OrderedSet.fromSorted(distinct, strategy, comparator));
+        WorkloadAdaptation<K> adaptation = WorkloadAdaptation.attach(set, policy);
+        adaptation.recordFeed(distinct);   // the load is the first workload the scorer sees
+        return adaptation;
     }
 
     /**
@@ -283,8 +397,11 @@ public final class BeefSort<K> {
         List<K> distinct = distinct(run.sorted());
         var favored = ProfileGuidedScorer.favoredStrategy(run.profile(), accessPolicy);
         TreeStrategy<K> born = (targetStrategy != null) ? targetStrategy.get() : favored.<K>newStrategy();
-        OrderedSet<K> set = OrderedSet.fromSorted(distinct, born, comparator);
-        return WorkloadAdaptation.attachProfileGuided(set, run.profile(), accessPolicy, run.sortMetrics(), policy);
+        OrderedSet<K> set = finishSet(OrderedSet.fromSorted(distinct, born, comparator));
+        WorkloadAdaptation<K> adaptation =
+                WorkloadAdaptation.attachProfileGuided(set, run.profile(), accessPolicy, run.sortMetrics(), policy);
+        adaptation.recordFeed(distinct);   // the load is the first workload the scorer sees
+        return adaptation;
     }
 
     /**
@@ -323,6 +440,27 @@ public final class BeefSort<K> {
                 .healthPolicy(healthPolicy)
                 .observe(observer)
                 .into(target, maxSize);
+    }
+
+    /**
+     * The fully-coupled stream: as {@link #adaptiveStream(OrderedSet, int)}, but drift reaches
+     * <em>both</em> engines. The sorter streams into {@code adaptation.set()}, the feed traffic is
+     * folded into the adaptation's workload monitor, and every fired drift verdict hands the tree one
+     * policy-gated {@code maybeAdapt()} — the sort re-tunes to the data distribution while the tree
+     * re-tunes to the same regime shift, each behind its own anti-thrash gates (docs §2.3 + §5,
+     * finally talking to each other).
+     */
+    public AdaptiveStreamSorter<K> adaptiveStream(WorkloadAdaptation<K> adaptation, int maxSize) {
+        return AdaptiveStreamSorter.<K>builder(comparator)
+                .keyEncoder(keyEncoder)
+                .byteSequenceEncoder(byteSequenceEncoder)
+                .selector(resolveSelector())
+                .policy(policy)
+                .detector(new DriftDetector())
+                .healthPolicy(healthPolicy)
+                .observe(observer)
+                .adaptTree(adaptation)
+                .into(adaptation.set(), maxSize);
     }
 
     /**

@@ -1,6 +1,7 @@
 package io.github.richeyworks.superbeefsort.stream;
 
 import io.github.richeyworks.csrbt.OrderedSet;
+import io.github.richeyworks.csrbt.control.MorphController;
 import io.github.richeyworks.superbeefsort.core.ByteSequenceEncoder;
 import io.github.richeyworks.superbeefsort.core.KeyEncoder;
 import io.github.richeyworks.superbeefsort.core.SortBuffer;
@@ -21,6 +22,7 @@ import io.github.richeyworks.superbeefsort.registry.StrategyRegistry;
 import io.github.richeyworks.superbeefsort.select.LearningStrategySelector;
 import io.github.richeyworks.superbeefsort.select.RuleBasedStrategySelector;
 import io.github.richeyworks.superbeefsort.select.SelectionPolicy;
+import io.github.richeyworks.superbeefsort.csrbt.WorkloadAdaptation;
 import io.github.richeyworks.superbeefsort.select.SortPlan;
 import io.github.richeyworks.superbeefsort.select.StrategySelector;
 
@@ -64,6 +66,7 @@ public final class AdaptiveStreamSorter<K> {
     private final int maxSize;
     private final HealthPolicy healthPolicy;
     private final SortObserver observer;
+    private final WorkloadAdaptation<K> treeAdaptation; // may be null: drift then reaches only the sorter
 
     private SortPlan currentPlan; // cached selection, refreshed only on drift
     private int batchIndex;
@@ -82,6 +85,12 @@ public final class AdaptiveStreamSorter<K> {
         this.observer = b.observer != null ? b.observer : SortObserver.NOOP;
         this.target = Objects.requireNonNull(target, "target");
         this.maxSize = maxSize;
+        this.treeAdaptation = b.treeAdaptation;
+        if (treeAdaptation != null) {
+            // Route the stream's feed traffic into the tree's workload monitor, so the same batches
+            // that drive sort re-selection also inform the tree's morph decisions.
+            target.observedBy(treeAdaptation.monitor());
+        }
     }
 
     public static <K> Builder<K> builder(Comparator<? super K> comparator) {
@@ -125,6 +134,20 @@ public final class AdaptiveStreamSorter<K> {
         }
 
         FeedResult feed = new StreamingFeeder<K>(maxSize, healthPolicy).feed(buffer.toList(), target);
+
+        // Drift → tree coupling (the other half of "this is the sort-side mirror of CSRBT's
+        // MorphController"): a drift verdict means the regime changed for the TREE too, so give its
+        // control plane one policy-gated evaluation. The MorphPolicy's own cooldown/margin/stability
+        // gates keep this from thrashing — we only hand it the moment; it decides.
+        if (treeAdaptation != null && verdict.drift()) {
+            MorphController.MorphResult morph = treeAdaptation.maybeAdapt();
+            if (morph.morphed()) {
+                observer.onEvent(SortEvent.of(SortEvent.Type.TREE_EVENT,
+                        "drift-coupled morph: " + morph.from() + " -> " + morph.to()
+                                + " (batch " + idx + ")"));
+            }
+        }
+
         return new StreamSortResult<>(idx, profile, currentPlan, reselected, verdict.score(),
                 verdict.reason(), metrics, feed);
     }
@@ -180,6 +203,7 @@ public final class AdaptiveStreamSorter<K> {
         private DriftDetector detector;
         private HealthPolicy healthPolicy = HealthPolicy.defaults();
         private SortObserver observer = SortObserver.NOOP;
+        private WorkloadAdaptation<K> treeAdaptation;
 
         private Builder(Comparator<? super K> comparator) {
             this.comparator = comparator;
@@ -232,6 +256,18 @@ public final class AdaptiveStreamSorter<K> {
 
         public Builder<K> profiler(DataProfiler<K> p) {
             this.profiler = p;
+            return this;
+        }
+
+        /**
+         * Couple drift to the <em>tree's</em> control plane: the stream's feed traffic is routed into
+         * {@code adaptation.monitor()}, and every batch whose {@link DriftDetector} verdict fires also
+         * hands the tree one policy-gated {@code maybeAdapt()} — the regime shift the sorter just
+         * detected is exactly when the tree's strategy should be re-examined. The adaptation should
+         * wrap the same {@link OrderedSet} this sorter feeds ({@code into(adaptation.set(), n)}).
+         */
+        public Builder<K> adaptTree(WorkloadAdaptation<K> adaptation) {
+            this.treeAdaptation = adaptation;
             return this;
         }
 

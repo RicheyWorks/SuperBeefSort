@@ -14,6 +14,12 @@ public record SortEvent(Type type, String detail) {
         FEED_STARTED,
         FEED_COMPLETED,
         JOB_COMPLETED,
+        /**
+         * A CSRBT structured adaptation event (evict/morph/repair/quarantine/heal/promote/…)
+         * forwarded through {@code io.github.richeyworks.superbeefsort.csrbt.TreeEventBridge} —
+         * the tree side of the pipeline speaking on the same observer stream as the sort side.
+         */
+        TREE_EVENT,
         ERROR
     }
 

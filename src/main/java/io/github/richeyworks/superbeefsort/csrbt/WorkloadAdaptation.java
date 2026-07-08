@@ -101,8 +101,69 @@ public final class WorkloadAdaptation<K> {
     /** The live set: reads/writes flow through this instance, which is the one morphed in place. */
     public OrderedSet<K> set() { return set; }
 
+    /**
+     * The workload monitor this adaptation scores from. Hand it to {@code CsrbtTarget.observedBy(...)}
+     * so the <em>feed itself</em> is folded into the feature vector rather than leaving the first
+     * {@link #maybeAdapt()} to evaluate an EMPTY workload.
+     */
+    public WorkloadMonitor monitor() { return monitor; }
+
     /** The live set's current morph-managed strategy id (re-derived from {@code getStrategy()}). */
     public StrategyId currentStrategy() { return strategyIdOf(set.getStrategy()); }
+
+    // -- data-plane facade: apply to the set AND feed the monitor real signals --
+    // These are the preferred entry points: one tree walk answers the operation and measures it,
+    // so meanSearchDepth and rotationsPerWrite — the two shape-sensitive WorkloadFeatures that the
+    // observe* conveniences can only report as zero — carry realized values.
+
+    /**
+     * Membership via {@link OrderedSet#searchDepth}, recording the <em>realized</em> search depth —
+     * CSRBT's own javadoc calls depth "the primary signal for how good the current tree shape is",
+     * and this is the one-walk way to feed it honestly.
+     */
+    public boolean contains(K key) {
+        int d = set.searchDepth(key);
+        recordSearch(Objects.hashCode(key), d >= 0 ? d : ~d);
+        return d >= 0;
+    }
+
+    /** Insert via the live set, recording the rotations the write actually incurred. */
+    public boolean add(K key) {
+        long before = set.rotationCount();
+        boolean added = set.add(key);
+        if (added) {
+            recordAdd(Objects.hashCode(key), rotationsSince(before));
+        }
+        return added;
+    }
+
+    /** Remove via the live set, recording the rotations the delete actually incurred. */
+    public boolean remove(K key) {
+        long before = set.rotationCount();
+        boolean removed = set.remove(key);
+        if (removed) {
+            recordRemove(Objects.hashCode(key), rotationsSince(before));
+        }
+        return removed;
+    }
+
+    /** Rotation delta, guarded against the counter reset a morph/self-repair engine swap causes. */
+    private int rotationsSince(long before) {
+        long delta = set.rotationCount() - before;
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, delta));
+    }
+
+    /**
+     * Fold an already-completed feed into the monitor as the write burst it was: one
+     * {@code recordAdd} per fed key (O(1) each — the rolling monitor is a sketch). Call it with the
+     * distinct run right after a bulk build, or attach the monitor to the target up front with
+     * {@code CsrbtTarget.observedBy(monitor())} and let the feeders do this live.
+     */
+    public void recordFeed(Iterable<K> fedKeys) {
+        for (K k : fedKeys) {
+            recordAdd(Objects.hashCode(k), 0);
+        }
+    }
 
     public void recordSearch(int keyHash, int depthTouched) {
         monitor.recordSearch(keyHash, depthTouched);
@@ -125,7 +186,11 @@ public final class WorkloadAdaptation<K> {
 
     public void recordRemove(int keyHash) { recordRemove(keyHash, 0); }
 
-    /** Key-typed convenience: report a lookup of {@code key} (hashed for the workload sketch). */
+    /**
+     * Key-typed convenience: report a lookup of {@code key} (hashed for the workload sketch).
+     * Records depth 0 because the walk already happened elsewhere — prefer routing the operation
+     * through {@link #contains(Object)}, which measures the realized depth in the same walk.
+     */
     public void observeSearch(K key) { recordSearch(Objects.hashCode(key), 0); }
 
     /** Key-typed convenience: report an insertion of {@code key}. */

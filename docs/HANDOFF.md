@@ -1,10 +1,52 @@
 # SuperBeefSort — handoff notes
 
-Last updated: 2026-06-23. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 + Phase 3 done.
-Phase 2 Rust kernel productized; native is 2× slower than Java at n≥100k (FFM marshaling cost); selector
-integration deferred (item 7). Phase 4 gate measured: real exploitable gaps found; action item 2 closed;
-items 3-5 open. Phase 5 external merge sort + typed step-event stream done.**
+Last updated: 2026-06-24. Author: Richmond (with Claude). Status: **Phase 0 + Phase 1 + Phase 3 done.
+Phase 2 Rust kernel productized (native 2× slower at n≥100k — FFM cost), but `radix.lsd.parallel` is
+JMH-validated + selector-routed; item 7 closed. Phase 4 done — 4a learned selector + 4b gRPC `SbsIntelligence`
+service, `RemoteStrategySelector` client, and the retrain/hot-swap loop (all verified in-sandbox). Phase 5
+external merge sort + typed step-event stream done.**
 Plus: a global inversion signal, a learned (sample) sort, deterministic mode,
+
+## Session 2026-06-24 — Phase 4b retrain/hot-swap loop (Phase 4b complete)
+
+Continued from 2026-06-23b. The last open Phase 4b item — the retrain/hot-swap loop — is now built and
+**verified in-sandbox** (sklearn + grpc via pip; no Java touched this session). Phase 4b is done.
+
+**1. `tools/phase4/service/retrain.py` (new).** Turns the accumulated `observations.jsonl` (what `Observe`
+appends: raw `DataProfile` + chosen strategy + measured cost) into a fresh schema-v1 `sbs_selector_model.{json,txt}`.
+Honest about bandit feedback: bucket observations into coarse contexts, label each by its **empirically cheapest**
+strategy (mean `comparisons + moves`), then **union** with the oracle-labeled seed corpus (`phase4_train.csv`) so
+unseen contexts keep their oracle label (no catastrophic forgetting). Same depth-8 tree as `train_selector.py`;
+export reuses `train_selector.export_tree/export_flat`, so the artifact is byte-compatible with `server.load_model`
+and Java `SelectorModel`. Writes via temp + atomic `os.replace`. `--obs-weight` up-weights production rows;
+`--min-support` gates thin evidence. Offline policy improvement, not online learning (a context needs ≥2 strategies'
+evidence — a fleet of mixed selectors — before its label can move).
+
+**2. `server.py` hot-swap.** New `ModelStore` (lock-guarded `reload()`; `current()` is a torn-read-safe single ref
+read) + a daemon file-mtime **watcher** thread + a **SIGHUP** handler. `serve(..., watch=, sighup=)` both default
+OFF so the existing `smoke_test.py` `serve(...)` is unchanged; `python3 server.py` now runs with watch+SIGHUP on.
+`model_version` gained a content hash (`<type>.s<schema>.n<nodes>.<sha1>`) so a swap is visible in every
+`PredictResponse`. `load_model`/`walk`/`serve` signatures preserved.
+
+**3. `retrain_test.py` (new) — end-to-end, in-sandbox.** (1) retrain on a synthetic corpus relabels a context and
+**flips** its predicted strategy (`counting`→`insertion`), version bumps; (2) `ModelStore.reload` swaps the model
+and `maybe_reload` no-ops when unchanged; (3) a **live gRPC server hot-swaps** the model under a running `Predict`
+stream (the watcher picks up the atomic replace), version `..9163c944`→`..aab82baf`, no restart. `smoke_test.py`
+stays **72/72**. An independent **subagent** re-ran both suites and reviewed labeling parity, atomicity, and edge
+cases (empty corpus → exit 2; malformed lines skipped; novel class safe) — verdict: ship.
+
+**Sandbox caveat (recurred):** the bash mount served **truncated** copies of `server.py` and `retrain.py` right
+after Edit-tool writes (host files via the Read tool were complete + correct). Re-saving each file's full content
+through bash resynced the mount; tests then passed. No Java changed, so `./gradlew build` is unaffected.
+
+**Working-tree cleanup before the host commit:** the `RadixSortStrategy.java` working-tree diff is **CRLF-only**
+(0→115 CR lines; `git diff --ignore-all-space` is empty) — sandbox-editor noise, not a code change; `git restore`
+it so the commit is clean (confirms the documented refactor revert). `.claude/settings.local.json` is untracked
+local agent settings — gitignore it, don't commit. New to commit: `tools/phase4/service/{retrain.py,retrain_test.py}`
++ the `server.py` / README / ADR / PROGRESS updates. (`*_pb2*.py` stubs and `*.jsonl` corpora are already
+gitignored in `tools/phase4/service/.gitignore`.)
+
+---
 
 ## Session 2026-06-23b — Phase 2 item 7 closed (JMH-validated); 14% side-quest rejected; Phase 4b started
 
@@ -34,9 +76,15 @@ service (ADR item 6). Proto `src/main/proto/sbs_intelligence.proto` (`Predict`/`
 `tools/phase4/service/server.py` serves the schema-v1 flat tree (walks it identically to Java `SelectorModel`,
 `SMART`-only advice) and appends the observe stream to `observations.jsonl`. **Verified in-sandbox**
 (`smoke_test.py`): 72/72 `Predict` parity vs an independent unrounded oracle (4 sizes × 9 shapes × 2 key modes),
-plus Observe + non-SMART. **Next (host-built):** Java `RemoteStrategySelector` (size gate + circuit breaker +
-local fallback) + grpc build wiring (protobuf gradle plugin + grpc-java), then the retrain/hot-swap loop.
-Design in `tools/phase4/service/README.md`.
+plus Observe + non-SMART. The **Java client is now written** (same session): core grpc-free
+`select/RemoteStrategySelector` + `select/IntelligenceClient` seam + pure `intelligence/CircuitBreaker`,
+unit-tested by `RemoteStrategySelectorTest` + `CircuitBreakerTest` (no grpc → they run in the default build).
+The transport is the **opt-in** `sbs-intelligence-client` module (`-PwithIntelligence`, so `./gradlew build`
+stays grpc-free) with `GrpcIntelligenceClient` (per-call deadline + breaker, never throws), generating Java
+stubs from the shared proto. **Host-build to verify** the grpc/protobuf codegen
+(`./gradlew :sbs-intelligence-client:build -PwithIntelligence`); the grpc-free core selector + breaker tests
+run in the normal `./gradlew build`. **Next:** the retrain/hot-swap loop. Design in
+`tools/phase4/service/README.md`.
 
 **Sandbox caveats this session:** the bash mount served stale/truncated views of Edit-tool-written files (the
 host files were correct — verified via the Read tool and the host `gradlew build`), and a stray `.git/index.lock`

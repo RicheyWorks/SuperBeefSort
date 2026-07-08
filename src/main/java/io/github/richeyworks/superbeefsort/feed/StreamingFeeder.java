@@ -35,7 +35,16 @@ public final class StreamingFeeder<K> implements SortFeeder<K> {
     @Override
     public FeedResult feed(List<K> sortedRun, CsrbtTarget<K> target) {
         long start = System.nanoTime();
-        if (maxSize > 0 && target.supportsWindow()) {
+        if (maxSize > 0) {
+            if (!target.supportsWindow()) {
+                // Fail loudly rather than silently streaming unbounded: a caller who asked for a
+                // bounded window on a target with no window (e.g. an EnsembleOrderedSet) would
+                // otherwise get quietly unlimited growth — the worst kind of surprise.
+                throw new IllegalArgumentException(
+                        "bounded streaming (maxSize=" + maxSize + ") requires a windowed target "
+                        + "(an OrderedSet); this target does not support setMaxSize. "
+                        + "Feed the ensemble unbounded, or stream into an OrderedSet.");
+            }
             target.setMaxSize(maxSize); // bound the target: FIFO eviction keeps the window at maxSize
         }
         int n = sortedRun.size();

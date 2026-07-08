@@ -63,16 +63,47 @@ python3 server.py                   # serve on 127.0.0.1:50051 (model ../sbs_sel
 over real mirror profiles — verified **72/72** across 4 sizes × 9 shapes × 2 key modes (all four model classes
 exercised), plus the Observe and non-SMART paths.
 
-## Continual learning (follow-up)
+## Continual learning — the retrain/hot-swap loop
 
-Periodically retrain from the accumulated `observations.jsonl` with `../train_selector.py` and hot-swap the
-served model; `PredictResponse.model_version` surfaces which model answered. (The first increment serves a
-static model and accumulates the corpus; the retrain/hot-swap loop is the next step.)
+`Observe` accumulates production telemetry in `observations.jsonl`; `retrain.py` turns it into a new model and
+a running server hot-swaps it with **no restart**.
+
+```sh
+# 1. retrain from the corpus, writing straight onto the served model (atomic os.replace)
+python3 retrain.py observations.jsonl --seed ../phase4_train.csv --out ../sbs_selector_model
+# 2. a server started with the watcher (the default in `python3 server.py`) hot-swaps within poll_secs;
+#    or signal an explicit reload:  kill -HUP <server-pid>
+python3 retrain_test.py     # end-to-end: retrain relabel/flip + ModelStore reload + live gRPC hot-swap
+```
+
+**Labeling.** `retrain.py` buckets each observation into a coarse *context* (size decade × key-stats ×
+counting-feasibility × distribution × byte-key × sortedness band) and labels the context by its **empirically
+cheapest** strategy (mean `comparisons + moves` over the observations that fell in it), then **unions** those
+production rows with the oracle-labeled seed corpus (`phase4_train.csv`) so contexts production never exercised
+keep their oracle label — no catastrophic forgetting. `--obs-weight` up-weights production rows vs the seed. It
+fits the same depth-8 tree as `train_selector.py` and reuses its exporters, so the artifact is byte-compatible
+with `server.load_model` and Java `SelectorModel`. This is **offline policy improvement** (refine where
+production gives multi-arm evidence), not online learning: Observe only ever records the cost of the arm that
+*was pulled*, so a context needs evidence for ≥2 strategies (a fleet running a mix of selectors) before its
+label can actually move.
+
+**Hot-swap.** `server.ModelStore` holds the active model; `current()` is a torn-read-safe single reference read,
+`reload()` re-parses under a lock. A daemon **watcher** thread polls the model file's `(mtime, size)` and reloads
+on change; **SIGHUP** reloads too. `model_version` carries a content hash (`<type>.s<schema>.n<nodes>.<sha1>`),
+so a swap is visible in every `PredictResponse`. `retrain.py`'s atomic `os.replace` guarantees the watcher only
+ever observes a complete old or complete new file, never a half-written one.
 
 ## Status
 
 - [x] Proto contract (`src/main/proto/sbs_intelligence.proto`)
 - [x] Python server: serve flat tree (Predict) + ingest corpus (Observe) — verified in-sandbox (72/72 parity)
-- [ ] Java `RemoteStrategySelector` (size gate + circuit breaker + local fallback) + build wiring
-      (protobuf gradle plugin + grpc-java deps) — host-built, the next increment
-- [ ] Retrain/hot-swap loop for continual learning
+- [x] Java client (core, grpc-free): `select/RemoteStrategySelector` (SMART + size gate + confidence +
+      applicability, else delegate) + `select/IntelligenceClient` seam + pure `intelligence/CircuitBreaker` —
+      unit-tested (`RemoteStrategySelectorTest`, `CircuitBreakerTest`), run in the default build
+- [x] gRPC transport: opt-in `sbs-intelligence-client` module (`-PwithIntelligence`) with
+      `GrpcIntelligenceClient` (per-call deadline + breaker, never throws). Generates Java stubs from the proto.
+      **Host-build to verify** (grpc 1.62.2 / protobuf 3.25.3 / protobuf-gradle 0.9.4):
+      `./gradlew :sbs-intelligence-client:build -PwithIntelligence`
+- [x] Retrain/hot-swap loop: `retrain.py` (observations → versioned model, atomic os.replace) + `server.py`
+      `ModelStore` hot-swap (file-watch + SIGHUP, content-hash `model_version`). Verified in-sandbox by
+      `retrain_test.py` (retrain relabel/flip + ModelStore reload + live gRPC hot-swap); `smoke_test.py` 72/72.

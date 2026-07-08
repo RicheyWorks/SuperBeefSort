@@ -12,6 +12,13 @@ if (JavaVersion.current() >= JavaVersion.VERSION_22) {
     include("sbs-kernels-rust")
 }
 
+// Optional gRPC learned-selection client (Phase 4b). It pulls in protobuf + grpc-java + netty, so it is
+// opt-in: this keeps the default build (and `./gradlew build`) grpc-free and offline. Include it with
+// -PwithIntelligence, e.g.  ./gradlew :sbs-intelligence-client:build -PwithIntelligence
+if (startParameter.projectProperties.containsKey("withIntelligence")) {
+    include("sbs-intelligence-client")
+}
+
 dependencyResolutionManagement {
     repositories {
         mavenCentral()

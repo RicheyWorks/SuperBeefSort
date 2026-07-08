@@ -2,8 +2,8 @@
 
 **Status:** Phase 4a Done (action items 1–5 — corpus logged, gaps measured, model trained + exported,
 in-process `LearnedModelStrategySelector` built, in-JVM JMH confirms inference is free past the size gate).
-Phase 4b In Progress (item 6 — the gRPC `SbsIntelligence` server is built + verified in-sandbox; the Java
-`RemoteStrategySelector` client + build wiring are next).
+Phase 4b done (item 6 — the gRPC `SbsIntelligence` server, the Java `RemoteStrategySelector` client + opt-in
+transport, and the retrain/hot-swap loop are all built + verified in-sandbox; host-build confirms the grpc codegen).
 **Date:** 2026-06-20 (items 3-4 added 2026-06-21)
 **Deciders:** Richmond (project owner)
 **Related:** `docs/HANDOFF.md` (Phase 4 roadmap), `select/StrategySelector` + `select/LearningStrategySelector` (the seams), `select/BanditStrategySelector` (the in-process learned baseline), `select/CostModelStrategySelector` (the analytic baseline / prior source), `profile/DataProfile` (the feature vector), `core/SortResult` (the label)
@@ -271,8 +271,8 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
 
    Run: `./gradlew jmh -Pbench=SelectorInferenceLatencyBenchmark` (select-only) or
    `-Pbench=SelectorBenchmark` (profile+select + full-sort groups).
-6. [~] **Phase 4b — in progress (2026-06-23):** `SbsIntelligence` gRPC service + `RemoteStrategySelector` with
-   size gate + circuit breaker + local fallback, for continual/fleet-wide learning.
+6. [x] **Phase 4b — done (2026-06-24):** `SbsIntelligence` gRPC service + `RemoteStrategySelector` (size gate +
+   circuit breaker + local fallback) + the retrain/hot-swap loop, for continual/fleet-wide learning.
    - **Proto contract** `src/main/proto/sbs_intelligence.proto`:
      `Predict(DataProfile, policy) -> (strategy_id, confidence, model_version)` and
      `Observe(DataProfile, chosen, outcome) -> (accepted, corpus_size)`. The client sends the **raw**
@@ -284,10 +284,26 @@ a learned profiler only if feature gaps, not model quality, turn out to bound ac
      only, and appends the `observe` stream to `observations.jsonl` (the continual-retrain corpus).
      **Verified in-sandbox** by `smoke_test.py`: **72/72 `Predict` parity** vs an independent unrounded oracle
      across 4 sizes × 9 shapes × 2 key modes (all four classes), plus the Observe + non-SMART paths.
-   - **Next (host-built):** the Java `RemoteStrategySelector` — mirrors `LearnedModelStrategySelector` gating
-     plus a deadline + circuit breaker that falls back to the local delegate (`Observe` fire-and-forget) — and
-     the build wiring (protobuf gradle plugin + grpc-java deps). Then the retrain/hot-swap loop. Design + run
-     docs in `tools/phase4/service/README.md`.
+   - **Java client (done; host-build to verify):** core, grpc-free — `select/RemoteStrategySelector` (mirrors
+     `LearnedModelStrategySelector` gating: SMART + size gate + confidence + applicability, else the delegate),
+     the `select/IntelligenceClient` seam, and a pure `intelligence/CircuitBreaker`; unit-tested by
+     `RemoteStrategySelectorTest` + `CircuitBreakerTest` (no grpc, so they run in the default build). The
+     transport is the **opt-in** `sbs-intelligence-client` module (`-PwithIntelligence`, keeping the core build
+     grpc-free): `GrpcIntelligenceClient` wraps each call in a deadline + the breaker and never throws,
+     generating Java stubs from the shared proto. Compiled host-side (the sandbox has no JDK 17 / CSRBT / grpc).
+   - **Retrain/hot-swap loop (done; verified in-sandbox):** `tools/phase4/service/retrain.py` turns the
+     accumulated `observations.jsonl` into a fresh schema-v1 model — it labels each coarse context by its
+     **empirically cheapest** strategy (mean `comparisons + moves`) and unions that with the oracle-labeled
+     seed corpus (anti-forgetting), fits the same depth-8 tree, and reuses `train_selector.export_*` so the
+     artifact is byte-compatible with both loaders. It writes via a temp file + `os.replace` (atomic). The
+     server hot-swaps with **no restart**: a `ModelStore` reloads under a lock (`current()` is a
+     torn-read-safe single ref read), driven by a file-mtime **watcher** thread and a **SIGHUP** handler;
+     `model_version` now carries a content hash so a swap is visible to callers. Verified end-to-end in-sandbox
+     by `retrain_test.py` (retrain relabels + flips a context's pick; `ModelStore` reload bumps the version; a
+     live gRPC server hot-swaps a model mid-`Predict` stream), with `smoke_test.py` still **72/72**. This is
+     offline policy improvement — refine where production gives multi-arm evidence — not online learning.
+   - **Remaining (optional):** a `BeefSort` facade convenience for wiring `RemoteStrategySelector`, and a
+     scheduler/daemon to run `retrain.py` periodically. Design + run docs in `tools/phase4/service/README.md`.
 
 **Done-well metric:** a learned selector that **measurably beats `BanditStrategySelector`** on held-out
 workloads, while a missing/slow/disabled model leaves selection byte-for-byte the cost-model path it is today.

@@ -40,6 +40,7 @@ public final class EnsembleAdaptation<K> {
 
     private final EnsembleOrderedSet<K> ensemble;
     private final EnsembleController<K> controller;
+    private final WorkloadMonitor monitor;
     private int opsSinceEval;
     private int evaluations;
     private int promotions;
@@ -48,7 +49,7 @@ public final class EnsembleAdaptation<K> {
     private EnsembleAdaptation(EnsembleOrderedSet<K> ensemble, WorkloadMonitor monitor,
                               StrategyScorer scorer, MorphPolicy policy) {
         this.ensemble = Objects.requireNonNull(ensemble, "ensemble");
-        Objects.requireNonNull(monitor, "monitor");
+        this.monitor = Objects.requireNonNull(monitor, "monitor");
         Objects.requireNonNull(scorer, "scorer");
         Objects.requireNonNull(policy, "policy");
         this.controller = new EnsembleController<>(ensemble, monitor, scorer, policy);
@@ -94,6 +95,26 @@ public final class EnsembleAdaptation<K> {
 
     /** The live ensemble: route reads/writes through this adapter, which is the one promoted in place. */
     public EnsembleOrderedSet<K> ensemble() { return ensemble; }
+
+    /**
+     * The workload monitor this adaptation scores from. Hand it to {@code CsrbtTarget.observedBy(...)}
+     * so the <em>feed itself</em> is folded into the feature vector — a bulk load is exactly the
+     * write-burst/growth signal the scorer should see, and without it the first {@link #maybePromote()}
+     * after a feed evaluates an EMPTY workload.
+     */
+    public WorkloadMonitor monitor() { return monitor; }
+
+    /**
+     * This adaptation as a feeder-compatible health hook for {@code CsrbtTarget.withHealthHook(...)}:
+     * each call runs one {@link #checkHealth()} cadence (failover / quarantine / heal / retire) and
+     * returns {@code true} iff the cadence found nothing to correct. This is how
+     * {@code HealthGatedFeeder} / {@code PrecisionFeeder} exercise real ensemble health mid-feed
+     * instead of reporting zero checks — an {@code EnsembleOrderedSet} is not a {@code SelfHealingTree};
+     * its health story is the controller's.
+     */
+    public java.util.function.BooleanSupplier healthHook() {
+        return () -> !checkHealth().changed();
+    }
 
     /** The {@link StrategyId} of the member currently serving reads, or {@code null} if unmapped. */
     public StrategyId currentPrimary() { return controller.currentPrimaryId(); }

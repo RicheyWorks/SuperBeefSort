@@ -1,6 +1,7 @@
 package io.github.richeyworks.superbeefsort.feed;
 
 import io.github.richeyworks.csrbt.OrderedSet;
+import io.github.richeyworks.csrbt.control.WorkloadMonitor;
 import io.github.richeyworks.csrbt.ensemble.EnsembleMode;
 import io.github.richeyworks.csrbt.ensemble.EnsembleOrderedSet;
 import io.github.richeyworks.csrbt.interfaces.OrderedCollection;
@@ -8,6 +9,8 @@ import io.github.richeyworks.csrbt.interfaces.SelfHealingTree;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * SuperBeefSort's boundary to CSRBT. Wraps any {@link OrderedCollection} — both {@link OrderedSet} and
@@ -25,6 +28,9 @@ public final class CsrbtTarget<K> {
     private final SelfHealingTree healing;                // may be null
     private final OrderedSet<K> orderedSet;               // non-null only when the target is an OrderedSet
     private final EnsembleOrderedSet<K> ensemble;         // non-null only when the target is an EnsembleOrderedSet
+
+    private WorkloadMonitor monitor;                      // optional: feed traffic becomes control-plane signal
+    private BooleanSupplier healthHook;                   // optional: overrides the SelfHealingTree hook
 
     private CsrbtTarget(OrderedCollection<K> collection, Comparator<? super K> comparator,
                         SelfHealingTree healing, OrderedSet<K> orderedSet, EnsembleOrderedSet<K> ensemble) {
@@ -52,8 +58,38 @@ public final class CsrbtTarget<K> {
         return new CsrbtTarget<>(collection, comparator, healing, orderedSet, ensemble);
     }
 
+    /**
+     * Route feed traffic into a CSRBT {@link WorkloadMonitor}, so the feed itself becomes visible to
+     * the control plane instead of leaving a freshly adaptive tree with an EMPTY feature vector: every
+     * effective insert through {@link #add} / {@link #bulkBuild} / {@link #ensembleBulkBuild} is
+     * recorded as a write op. Pass e.g. {@code adaptation.monitor()} so the first
+     * {@code maybeAdapt()}/{@code maybePromote()} after a feed scores real write-burst features.
+     * {@code null} detaches. Returns {@code this} for chaining.
+     */
+    public CsrbtTarget<K> observedBy(WorkloadMonitor monitor) {
+        this.monitor = monitor;
+        return this;
+    }
+
+    /**
+     * Install an explicit health hook consulted by {@link #checkHealth()} <em>instead of</em> the
+     * {@link SelfHealingTree} seam. This is how an ensemble feed gets real health gating: an
+     * {@code EnsembleOrderedSet} is not a {@code SelfHealingTree} (its richer story is the controller's
+     * failover/quarantine/heal cadence), so pass {@code EnsembleAdaptation.healthHook()} and the
+     * health-gated/precision feeders will exercise it mid-feed rather than reporting zero checks.
+     * The hook returns {@code true} when the cadence found the target healthy. {@code null} detaches.
+     */
+    public CsrbtTarget<K> withHealthHook(BooleanSupplier hook) {
+        this.healthHook = hook;
+        return this;
+    }
+
     public boolean add(K value) {
-        return collection.add(value);
+        boolean added = collection.add(value);
+        if (added && monitor != null) {
+            monitor.recordAdd(Objects.hashCode(value));
+        }
+        return added;
     }
 
     public int size() {
@@ -65,11 +101,14 @@ public final class CsrbtTarget<K> {
     }
 
     public boolean supportsHealthCheck() {
-        return healing != null;
+        return healthHook != null || healing != null;
     }
 
     /** Asks CSRBT to validate and, if needed, repair itself. Returns true if the tree is valid. */
     public boolean checkHealth() {
+        if (healthHook != null) {
+            return healthHook.getAsBoolean();
+        }
         return healing == null || healing.selfRepair();
     }
 
@@ -102,6 +141,17 @@ public final class CsrbtTarget<K> {
             throw new IllegalStateException("bulk build requires an OrderedSet target");
         }
         orderedSet.buildFromSorted(ascendingDistinct);
+        recordBulk(ascendingDistinct);
+    }
+
+    /** Fold a bulk-built run into the attached monitor: the load is a write burst the scorer should see. */
+    private void recordBulk(List<K> keys) {
+        if (monitor == null) {
+            return;
+        }
+        for (K k : keys) {
+            monitor.recordAdd(Objects.hashCode(k));
+        }
     }
 
     /**
@@ -120,5 +170,6 @@ public final class CsrbtTarget<K> {
             throw new IllegalStateException("ensemble bulk build requires an EnsembleOrderedSet target");
         }
         ensemble.buildAllFromSorted(ascendingDistinct);
+        recordBulk(ascendingDistinct);
     }
 }

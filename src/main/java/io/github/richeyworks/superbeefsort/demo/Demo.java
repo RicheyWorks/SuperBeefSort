@@ -21,6 +21,12 @@ import java.util.Random;
 public final class Demo {
 
     public static void main(String[] args) {
+        if (args.length > 0 && "organism".equals(args[0])) {
+            // The full pipeline with live adaptation, recorded for CSRBT's arena visualizer:
+            // ./gradlew run --args="organism"
+            FullOrganismDemo.run();
+            return;
+        }
         randomUniform();
         nearlySorted();
     }

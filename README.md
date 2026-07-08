@@ -107,6 +107,44 @@ k-way tournament merge straight into CSRBT without ever materializing the whole 
 `stream.collect(BeefCollectors.toOrderedSet(cmp, enc))` runs the whole pipeline as a sink — sequential
 or parallel.
 
+## The adaptive integration surface (2026-07)
+
+The July 2026 audit (`docs/audit-csrbt-feeding-2026-07-07.md`) closed every gap between this
+engine and CSRBT's adaptive machinery. The `BeefSort` facade now spans four tiers:
+
+**Born optimal, wired to adapt.** `buildOrderedSet()` constructs in O(n) with the
+profile-advised strategy (WRITE_HEAVY tunes `WeightBalanced(Δ,Γ)` from the measured
+disorder). `buildAdaptive(policy)` / `buildCoOptimized(policy)` return a `WorkloadAdaptation`
+whose `contains`/`add`/`remove` feed CSRBT's control plane *real* signals — realized search
+depths and rotation deltas, one walk per op — and whose construction feed is the first
+workload the scorer sees. `buildNavigableSet()` is the `TreeSet` drop-in flavor;
+`buildOrderedSetPersisted(name, serializer)` ends the pipeline in a durable CSRBT snapshot
+(reloads are health-gated on the CSRBT side).
+
+**Ensembles, fully knobbed.** `buildEnsemble(spec)` / `buildAdaptiveEnsemble` /
+`buildCoOptimizedEnsemble` compose member mixes via `EnsembleSpec` — VERIFIED quorum reads,
+shadow modes, memory ceilings, member caps, and an automatic B+tree engine member above ~2M
+profiled keys. Promotion is an O(1) primary swap; the bulk feed routes through the
+adaptation's monitor. Bounded feeds (`STREAMING`, external merge) now target all-strategy
+ensembles too: CSRBT's window fans out per member with uniform eviction, and genuinely
+windowless mixes are rejected loudly, never fed silently unbounded.
+
+**Drift reaches both engines.** `adaptiveStream(adaptation, maxSize)` couples the
+`DriftDetector` to the tree: every fired verdict re-selects the *sort* strategy and hands the
+*tree* one policy-gated `maybeAdapt()` — each behind its own anti-thrash gates.
+
+**The evolution feed.** `buildEvolvingEnsemble(...)` runs CSRBT's evolution machine on live
+traffic — a UCB1 bandit over the verified `WB(Δ,Γ)` box, or a (μ+λ) population bred across an
+exact-shadow nursery — with births, gate-kills, and promotions streaming through
+`TreeEventBridge` onto the same observer as the sort events. (Honesty clause inherited from
+CSRBT's ADR-011: this tier is selection made observable, not a promised speedup.)
+
+**See it run:** `./gradlew run --args="organism"` drives the whole organism — profile →
+born-optimal set → three live regimes (read-heavy, hot-key skew, drifting bounded stream) —
+and writes `docs/organism-session.json`, replayable in CSRBT's `demo/visualizer.html`.
+Benchmarks: `WindowedFeedBenchmark` prices the ensemble window (`./gradlew jmh`). Hardening
+posture: `docs/hardening-audit-2026-07-08.md` (all findings remediated or documented).
+
 ## How it works
 
 One pipeline, every stage pluggable:

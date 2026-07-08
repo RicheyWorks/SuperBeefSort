@@ -45,11 +45,24 @@ public final class GrpcIntelligenceClient implements IntelligenceClient, AutoClo
     private final long deadlineMillis;
     private final CircuitBreaker breaker;
 
-    /** Connect to {@code target} (e.g. {@code "127.0.0.1:50051"}) with the default deadline + breaker. */
+    /**
+     * Connect to {@code target} (e.g. {@code "127.0.0.1:50051"}) with the default deadline + breaker.
+     *
+     * <p><b>Loopback only (hardening M-3):</b> this convenience constructor builds a
+     * <em>plaintext</em> channel — correct for the phase-4 sidecar on {@code 127.0.0.1} (the
+     * deployment it exists for; the service itself binds loopback only), but it must not be
+     * pointed across a network: data profiles would leave the host unencrypted and strategy
+     * advice would arrive with no transport integrity. For anything non-local, build a TLS
+     * {@link ManagedChannel} yourself (e.g. {@code Grpc.newChannelBuilder(target,
+     * TlsChannelCredentials.create())}) and use the
+     * {@linkplain #GrpcIntelligenceClient(ManagedChannel, boolean, long, CircuitBreaker)
+     * full-control constructor}.</p>
+     */
     public GrpcIntelligenceClient(String target) {
         this(target, DEFAULT_DEADLINE_MILLIS);
     }
 
+    /** As {@link #GrpcIntelligenceClient(String)} — plaintext, loopback only — with an explicit deadline. */
     public GrpcIntelligenceClient(String target, long deadlineMillis) {
         this(ManagedChannelBuilder.forTarget(target).usePlaintext().build(), true, deadlineMillis,
                 new CircuitBreaker(DEFAULT_FAILURE_THRESHOLD, DEFAULT_COOLDOWN_MILLIS));

@@ -73,10 +73,20 @@ public final class ExternalMergeSorter<K> {
 
     /**
      * Sort {@code input} and stream-feed the merged output directly into {@code target} without
-     * materialising the full output in memory — the out-of-core path. When {@code maxSize > 0}
-     * and the target supports it, sets the bounded-window capacity before feeding.
+     * materialising the full output in memory — the out-of-core path. When {@code maxSize > 0},
+     * the target must support a bounded window ({@code OrderedSet.setMaxSize}); a windowless
+     * target is rejected up front rather than silently fed unbounded (hardening M-1 — for the
+     * out-of-core path, "silently unbounded" defeats the entire point of spilling).
+     *
+     * @throws IllegalArgumentException if {@code maxSize > 0} and the target has no window
      */
     public ExternalSortResult sortAndFeed(List<K> input, CsrbtTarget<K> target, int maxSize) throws IOException {
+        if (maxSize > 0 && !target.supportsWindow()) {
+            throw new IllegalArgumentException(
+                    "bounded external feed (maxSize=" + maxSize + ") requires a windowed target "
+                    + "(an OrderedSet); this target does not support setMaxSize. "
+                    + "Feed unbounded, or feed into an OrderedSet.");
+        }
         long t0 = System.nanoTime();
         int n = input.size();
         List<SpillFile<K>> runs = generateRuns(input);
@@ -87,7 +97,7 @@ public final class ExternalMergeSorter<K> {
         List<SpillReader<K>> readers = openReaders(finalRuns);
         TournamentTree<K> tree = new TournamentTree<>(readers, comparator);
         try {
-            if (maxSize > 0 && target.supportsWindow()) {
+            if (maxSize > 0) {
                 target.setMaxSize(maxSize);
             }
             while (tree.hasNext()) {

@@ -52,7 +52,15 @@ public final class TreeEventBridge<K> implements TreeEventListener<K> {
         if (perKey && !perKeyEvents) {
             return;
         }
-        observer.onEvent(SortEvent.of(SortEvent.Type.TREE_EVENT, render(event)));
+        // Hardening M-2: CSRBT invokes this listener on its write path, under its locks. A throwing
+        // SortObserver must not be able to fail tree writes — observability never breaks the data
+        // plane. (CSRBT's emit() now also swallows listener faults; this catch keeps the guarantee
+        // even against CSRBT versions that don't.)
+        try {
+            observer.onEvent(SortEvent.of(SortEvent.Type.TREE_EVENT, render(event)));
+        } catch (RuntimeException observerFault) {
+            // dropped deliberately
+        }
     }
 
     /**

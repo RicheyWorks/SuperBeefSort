@@ -21,7 +21,20 @@ final class SpillFile<K> {
     }
 
     static <K> SpillFile<K> create(SpillSerializer<K> serializer) throws IOException {
-        Path tmp = Files.createTempFile("sbs-spill-", ".bin");
+        return create(serializer, null);
+    }
+
+    /**
+     * As {@link #create(SpillSerializer)} but spilling into {@code dir} (hardening L-1: spills
+     * hold the input data unencrypted, so sensitive workloads should point this at a locked-down
+     * or ephemeral directory instead of the world-shared system temp dir). {@code null} keeps the
+     * system temp dir. Either way the file is owner-created via {@code createTempFile} and
+     * registered delete-on-exit as a crash backstop; the normal path deletes it after the merge.
+     */
+    static <K> SpillFile<K> create(SpillSerializer<K> serializer, Path dir) throws IOException {
+        Path tmp = (dir == null)
+                ? Files.createTempFile("sbs-spill-", ".bin")
+                : Files.createTempFile(dir, "sbs-spill-", ".bin");
         tmp.toFile().deleteOnExit();
         return new SpillFile<>(tmp, serializer);
     }

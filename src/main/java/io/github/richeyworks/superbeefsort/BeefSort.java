@@ -230,6 +230,35 @@ public final class BeefSort<K> {
     }
 
     /**
+     * Gap 12: as {@link #buildOrderedSet()} but returned through CSRBT's {@code NavigableSet}
+     * adapter — a drop-in replacement for {@code TreeSet} call sites, built in O(n) from the
+     * sorted run and born with the profile-advised strategy. The adapter is a live view: order
+     * statistics remain reachable via the underlying set if you keep a reference.
+     */
+    public java.util.NavigableSet<K> buildNavigableSet() {
+        return new io.github.richeyworks.csrbt.adapter.NavigableOrderedSet<>(buildOrderedSet());
+    }
+
+    /**
+     * Gap 12: the persistence handoff — sort, construct the born-optimal {@link OrderedSet} (as
+     * {@link #buildOrderedSet()}), then persist it as a named CSRBT snapshot via
+     * {@link io.github.richeyworks.csrbt.persistence.FilePersistenceAdapter} (written under the
+     * adapter's {@code snapshots/} directory, name traversal-guarded by CSRBT). The sorted-run →
+     * balanced-tree → durable-snapshot pipeline in one call; reload later with
+     * {@code loadOrderedSet(name, keySerializer, comparator)} — loads are health-gated, so a
+     * corrupted snapshot is refused rather than served.
+     */
+    public OrderedSet<K> buildOrderedSetPersisted(String snapshotName,
+                                                  io.github.richeyworks.csrbt.persistence.KeySerializer<K> keySerializer) {
+        Objects.requireNonNull(snapshotName, "snapshotName");
+        Objects.requireNonNull(keySerializer, "keySerializer");
+        OrderedSet<K> set = buildOrderedSet();
+        new io.github.richeyworks.csrbt.persistence.FilePersistenceAdapter()
+                .saveSnapshot(snapshotName, set, keySerializer);
+        return set;
+    }
+
+    /**
      * Sort, then <em>construct and bulk-load</em> a CSRBT {@link EnsembleOrderedSet} composed from the profile
      * via the O(n)/member parallel bulk path — the default {@link EnsembleSpec#lean()} mix (access-advised
      * primary + a RedBlack replica). The "ensemble as a first-class target" pattern, docs §4.
@@ -580,9 +609,21 @@ public final class BeefSort<K> {
         private final SpillSerializer<K> serializer;
         private int runSize = 100_000;
         private int fanIn = 16;
+        private java.nio.file.Path spillDir;   // null = system temp dir
 
         private ExternalSortBuilder(SpillSerializer<K> serializer) {
             this.serializer = serializer;
+        }
+
+        /**
+         * Directory for the spill files (hardening L-1): spills hold the input data unencrypted,
+         * and the default is the world-shared system temp directory. Point this at a locked-down
+         * or ephemeral directory when the data is sensitive. The directory must exist; spill
+         * files are still deleted after the merge (and registered delete-on-exit as a backstop).
+         */
+        public ExternalSortBuilder spillDir(java.nio.file.Path dir) {
+            this.spillDir = dir;
+            return this;
         }
 
         /**
@@ -633,7 +674,7 @@ public final class BeefSort<K> {
         }
 
         private ExternalMergeSorter<K> sorter() {
-            return new ExternalMergeSorter<>(engine(), comparator, serializer, runSize, fanIn, spec());
+            return new ExternalMergeSorter<>(engine(), comparator, serializer, runSize, fanIn, spec(), spillDir);
         }
     }
 }

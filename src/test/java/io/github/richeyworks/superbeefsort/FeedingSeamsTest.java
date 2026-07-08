@@ -102,6 +102,19 @@ class FeedingSeamsTest {
     }
 
     @Test
+    void navigableSetFlavorIsADropInView() {
+        java.util.NavigableSet<Integer> nav = BeefSort.with(Comparator.<Integer>naturalOrder())
+                .source(new ArrayList<>(List.of(5, 3, 9, 1, 7)))
+                .buildNavigableSet();
+        assertEquals(5, nav.size());
+        assertEquals(1, nav.first().intValue());
+        assertEquals(9, nav.last().intValue());
+        assertEquals(5, nav.ceiling(4).intValue());
+        assertEquals(3, nav.floor(4).intValue());
+        assertTrue(nav.contains(7));
+    }
+
+    @Test
     void writeHeavyAdviceIsProfileTunedWeightBalance() {
         // No profile: the literature default WB(3,2).
         var advised = StrategyAdvisor.<Integer>advise(null, AccessPolicy.WRITE_HEAVY);

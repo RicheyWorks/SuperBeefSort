@@ -8,7 +8,10 @@ integration layer — audited with the same severity as everything else). Static
 > **Remediation status (same day):** M-1 fixed (`ExternalMergeSorter.sortAndFeed` now rejects a
 > bounded feed into a windowless target), M-2 fixed (`TreeEventBridge.onEvent` catches observer
 > faults; CSRBT's `emit` hardened in tandem), M-3 fixed (plaintext constructors documented
-> loopback-only with the TLS path spelled out). L/I items remain open as next-touch notes.
+> loopback-only with the TLS path spelled out). **L-tier closed 2026-07-08:** L-1
+> (`spillDir(...)` on the external builder / `ExternalMergeSorter` / `SpillFile`), L-2
+> (`checked_mul` in `sbs_radix_sort_keyed`; ScatterPtr's Send/Sync justification was already
+> pinned), L-3 (`CsrbtTarget` threading contract documented), L-4 (`PrecisionFeeder` cost warning).
 
 ## What's already hardened well
 

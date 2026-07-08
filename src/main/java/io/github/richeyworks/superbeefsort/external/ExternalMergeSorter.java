@@ -36,15 +36,29 @@ public final class ExternalMergeSorter<K> {
     private final int runSize;
     private final int maxFanIn;
     private final JobSpec jobSpec;
+    private final java.nio.file.Path spillDir;   // null = system temp dir (see spillDir ctor)
 
     public ExternalMergeSorter(BeefSortEngine<K> engine, Comparator<? super K> comparator,
                         SpillSerializer<K> serializer, int runSize, int maxFanIn, JobSpec jobSpec) {
+        this(engine, comparator, serializer, runSize, maxFanIn, jobSpec, null);
+    }
+
+    /**
+     * As the six-arg constructor but spilling into {@code spillDir} (hardening L-1 — spills hold
+     * the input data unencrypted; sensitive workloads should supply a locked-down or ephemeral
+     * directory). {@code null} keeps the system temp dir. Reachable fluently via
+     * {@code BeefSort.external(...).spillDir(dir)}.
+     */
+    public ExternalMergeSorter(BeefSortEngine<K> engine, Comparator<? super K> comparator,
+                        SpillSerializer<K> serializer, int runSize, int maxFanIn, JobSpec jobSpec,
+                        java.nio.file.Path spillDir) {
         this.engine = engine;
         this.comparator = comparator;
         this.serializer = serializer;
         this.runSize = runSize;
         this.maxFanIn = maxFanIn;
         this.jobSpec = jobSpec;
+        this.spillDir = spillDir;
     }
 
     /**
@@ -119,7 +133,7 @@ public final class ExternalMergeSorter<K> {
         for (int from = 0; from < input.size(); from += runSize) {
             int to = Math.min(input.size(), from + runSize);
             List<K> sorted = engine.sort(input.subList(from, to), comparator, jobSpec).sorted();
-            SpillFile<K> spill = SpillFile.create(serializer);
+            SpillFile<K> spill = SpillFile.create(serializer, spillDir);
             spills.add(spill);
             try (SpillWriter<K> w = spill.writer()) {
                 for (K element : sorted) {
@@ -154,7 +168,7 @@ public final class ExternalMergeSorter<K> {
 
     /** Merge a group of run files into one new spill file. Closes all readers when done. */
     private SpillFile<K> mergeGroup(List<SpillFile<K>> group) throws IOException {
-        SpillFile<K> merged = SpillFile.create(serializer);
+        SpillFile<K> merged = SpillFile.create(serializer, spillDir);
         List<SpillReader<K>> readers = openReaders(group);
         try (SpillWriter<K> w = merged.writer()) {
             TournamentTree<K> tree = new TournamentTree<>(readers, comparator);

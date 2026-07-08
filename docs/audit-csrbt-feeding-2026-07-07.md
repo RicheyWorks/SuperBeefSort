@@ -2,9 +2,11 @@
 
 **Date:** 2026-07-07 · **Scope:** integration wiring between SuperBeefSort (the feeder) and CSRBT (the eater), audited from source in both repos.
 
-> **Implementation status (same day):** Gaps 1–11 are now implemented — see §4 for the change map,
-> including the Gap-7 evolution feed. Gap 12 (persistence / NavigableSet) remains open by design
-> (adoption features, not integration features).
+> **Implementation status:** All 12 gaps are now implemented. Gaps 1–11 same day (see §4); Gap 12
+> landed 2026-07-08 — `BeefSort.buildNavigableSet()` (the `TreeSet` drop-in flavor via CSRBT's
+> `NavigableOrderedSet`) and `BeefSort.buildOrderedSetPersisted(name, keySerializer)` (the
+> sorted-run → balanced-tree → durable-snapshot pipeline via `FilePersistenceAdapter`, reloadable
+> through CSRBT's health-gated loads).
 
 ---
 

@@ -14,6 +14,13 @@ import java.util.List;
  *
  * <p>{@code healthy} latches false the moment any post-insert check fails, so the report tells you
  * whether the tree stayed valid throughout the whole feed, not just at the end.</p>
+ *
+ * <p><b>Cost warning (hardening L-4):</b> per-insert checking is quadratic by construction —
+ * {@code OrderedSet.selfRepair} is an O(n) rebuild (so an n-element feed costs O(n²) and repeatedly
+ * discards a splay tree's learned layout), and an ensemble health hook runs a full
+ * failover/quarantine/heal cadence per insert. Reserve this feeder for debugging and forensic runs
+ * on small inputs (thousands, not millions); for production health gating use
+ * {@link HealthGatedFeeder}, which checks per batch.</p>
  */
 public final class PrecisionFeeder<K> implements SortFeeder<K> {
 

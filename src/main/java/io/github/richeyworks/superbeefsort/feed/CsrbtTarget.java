@@ -20,6 +20,12 @@ import java.util.function.BooleanSupplier;
  *
  * <p>The comparator is captured here so the engine can guarantee SuperBeefSort sorts under the exact
  * order CSRBT inserts under; a mismatch would silently corrupt the tree.</p>
+ *
+ * <p><b>Threading (hardening L-3):</b> not thread-safe by design, matching CSRBT's feed cadence —
+ * one thread drives one target. {@link #observedBy} and {@link #withHealthHook} set plain fields
+ * with no synchronized publication, and the attached {@code WorkloadMonitor} is itself
+ * single-threaded by contract. (The parallelism in a parallel feed lives <em>inside</em> CSRBT's
+ * member fan-out and never touches this class concurrently.)</p>
  */
 public final class CsrbtTarget<K> {
 

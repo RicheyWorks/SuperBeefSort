@@ -295,9 +295,15 @@ pub extern "C" fn sbs_radix_sort_keyed(ptr: *mut u64, count: usize) {
     if ptr.is_null() || count < 2 {
         return;
     }
+    // Hardening L-2: checked multiply — a usize overflow of count*2 (only reachable on a 32-bit
+    // target fed a bogus count) must degrade to a no-op, never to an undersized-slice UB.
+    let len = match count.checked_mul(2) {
+        Some(l) => l,
+        None => return,
+    };
     // Safety: the Java caller allocates a confined `Arena` of exactly `count * 2 * 8` bytes,
     // aligned to 8 bytes, and does not access the segment concurrently with this call.
-    let data = unsafe { std::slice::from_raw_parts_mut(ptr, count * 2) };
+    let data = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
     sort_keyed_flat(data, count);
 }
 

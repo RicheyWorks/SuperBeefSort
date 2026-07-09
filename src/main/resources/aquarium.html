@@ -1,0 +1,156 @@
+<!doctype html>
+<!--
+  The CSRBT aquarium — live view of an adaptive ordered set under a rotating workload playlist.
+  Vanilla canvas + EventSource; the server (AquariumServer) knows nothing about this file beyond
+  serving it. Events: stats / state / eval / morph / repair / regime (see AquariumServer javadoc).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CSRBT aquarium</title>
+<style>
+  :root { --bg:#0b1220; --panel:#121b2e; --ink:#dbe6ff; --dim:#7f8db0; --red:#ff6b6b; --blk:#3d4c72; --acc:#5eead4; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 ui-monospace, Consolas, monospace; }
+  header { display:flex; gap:24px; flex-wrap:wrap; align-items:baseline; padding:12px 18px; background:var(--panel); }
+  header b { color:var(--acc); font-size:18px; }
+  .stat span { color:var(--dim); margin-right:4px; }
+  #regime { padding:6px 18px; color:var(--acc); border-bottom:1px solid #223; }
+  main { display:grid; grid-template-columns: 1fr 340px; gap:0; height: calc(100vh - 92px); }
+  #tank { position:relative; }
+  canvas { width:100%; height:100%; display:block; }
+  aside { border-left:1px solid #223; overflow:hidden; display:flex; flex-direction:column; }
+  aside h3 { margin:8px 12px 4px; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+  #ticker { flex:1; overflow-y:auto; margin:0; padding:0 12px 12px; list-style:none; }
+  #ticker li { padding:4px 6px; margin:3px 0; border-left:3px solid #2a3a5e; background:#0e1626; word-break:break-word; }
+  #ticker li.morph { border-color:var(--acc); color:var(--acc); }
+  #ticker li.eval  { border-color:#6a7fb5; color:#aab8dd; }
+  #ticker li.regime{ border-color:#f0c674; color:#f0c674; }
+  #ticker li.repair{ border-color:var(--red); color:var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <b>CSRBT aquarium</b>
+  <div class="stat"><span>strategy</span><em id="strategy">—</em></div>
+  <div class="stat"><span>size</span><em id="size">—</em></div>
+  <div class="stat"><span>window</span><em id="window">—</em></div>
+  <div class="stat"><span>ops</span><em id="ops">—</em></div>
+  <div class="stat"><span>rotations</span><em id="rot">—</em></div>
+  <div class="stat"><span>evictions</span><em id="ev">—</em></div>
+  <div class="stat"><span>morphs</span><em id="morphs">0</em></div>
+</header>
+<div id="regime">warming up…</div>
+<main>
+  <div id="tank"><canvas id="cv"></canvas></div>
+  <aside>
+    <h3>control-plane ticker</h3>
+    <ul id="ticker"></ul>
+  </aside>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+let tree = null, morphCount = 0, flashUntil = 0;
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  draw();
+}
+addEventListener("resize", resize);
+
+/* In-order x, depth y — the classic BST layout, over the depth-capped snapshot. */
+function flatten(root) {
+  const nodes = [], edges = []; let x = 0, maxDepth = 1;
+  (function walk(n, depth) {
+    if (!n) return null;
+    maxDepth = Math.max(maxDepth, depth);
+    if (n.trunc !== undefined) {                       // truncated subtree marker
+      const me = { x: x++, y: depth, trunc: n.trunc }; nodes.push(me); return me;
+    }
+    const L = walk(n.l, depth + 1);                    // in-order: left reserves x first
+    const me = { x: x++, y: depth, k: n.k, c: n.c }; nodes.push(me);
+    const R = walk(n.r, depth + 1);
+    if (L) edges.push([me, L]);
+    if (R) edges.push([me, R]);
+    return me;
+  })(root, 1);
+  return { nodes, edges, width: x, maxDepth };
+}
+
+function draw() {
+  const w = cv.width / devicePixelRatio, h = cv.height / devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  if (Date.now() < flashUntil) {                       // morph flash
+    ctx.fillStyle = "rgba(94,234,212,0.08)"; ctx.fillRect(0, 0, w, h);
+  }
+  if (!tree) return;
+  const { nodes, edges, width, maxDepth } = flatten(tree);
+  if (!nodes.length) return;
+  const px = i => 24 + (w - 48) * (i + 0.5) / width;
+  const py = d => 28 + (h - 56) * (d - 1) / Math.max(1, maxDepth - 1 || 1);
+  ctx.strokeStyle = "#2a3a5e"; ctx.lineWidth = 1;
+  for (const [a, b] of edges) {
+    ctx.beginPath(); ctx.moveTo(px(a.x), py(a.y)); ctx.lineTo(px(b.x), py(b.y)); ctx.stroke();
+  }
+  const r = Math.max(1.6, Math.min(6, (w - 48) / width / 2.2));
+  for (const n of nodes) {
+    ctx.beginPath();
+    if (n.trunc !== undefined) {
+      ctx.fillStyle = "#39507f";
+      ctx.arc(px(n.x), py(n.y), r * 0.9, 0, 7); ctx.fill();
+    } else {
+      ctx.fillStyle = n.c === "RED" ? "#ff6b6b" : "#8fa4d4";
+      ctx.arc(px(n.x), py(n.y), r, 0, 7); ctx.fill();
+    }
+  }
+}
+
+function tick(cls, text) {
+  const li = document.createElement("li");
+  li.className = cls; li.textContent = text;
+  const t = $("ticker");
+  t.prepend(li);
+  while (t.children.length > 60) t.removeChild(t.lastChild);
+}
+
+const es = new EventSource("/events");
+es.onmessage = e => {
+  const m = JSON.parse(e.data);
+  switch (m.t) {
+    case "stats":
+      $("size").textContent = m.size; $("ops").textContent = m.op;
+      $("strategy").textContent = m.strategy;
+      $("window").textContent = m.window > 0 ? m.window : "∞";
+      $("rot").textContent = m.rotations; $("ev").textContent = m.evicts;
+      break;
+    case "state":
+      tree = m.state; $("strategy").textContent = m.strategy; draw();
+      break;
+    case "regime":
+      $("regime").textContent = "regime: " + m.name + " (" + m.ops + " ops, window "
+          + (m.window > 0 ? m.window : "∞") + ", lap " + m.lap + ")";
+      tick("regime", "regime → " + m.name);
+      break;
+    case "eval":
+      tick("eval", "eval @" + m.op + ": " + (m.morphed ? "MORPH " + m.from + " → " + m.to
+                                                       : "hold — " + m.reason));
+      break;
+    case "morph":
+      morphCount++; $("morphs").textContent = morphCount;
+      flashUntil = Date.now() + 900;
+      tick("morph", "MORPH " + m.from + " → " + m.to + (m.committed ? "" : " (rejected by health gate)"));
+      break;
+    case "repair":
+      tick("repair", "self-repair → " + (m.healthy ? "healthy" : "UNHEALTHY"));
+      break;
+  }
+};
+es.onerror = () => tick("repair", "stream lost; retrying…");
+resize();
+</script>
+</body>
+</html>

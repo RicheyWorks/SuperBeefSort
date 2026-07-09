@@ -142,6 +142,13 @@ CSRBT's ADR-011: this tier is selection made observable, not a promised speedup.
 **See it run:** `./gradlew run --args="organism"` drives the whole organism — profile →
 born-optimal set → three live regimes (read-heavy, hot-key skew, drifting bounded stream) —
 and writes `docs/organism-session.json`, replayable in CSRBT's `demo/visualizer.html`.
+**Or watch it live:** `./gradlew run --args="aquarium"` opens the tank at
+`http://127.0.0.1:8077/` — an adaptive set swimming through an endless
+[`Workloads.aquariumPlaylist`](src/main/java/io/github/richeyworks/superbeefsort/workload/Workloads.java)
+(read-heavy → hot-key skew → write burst → windowed climb), every control-plane decision
+streamed over SSE and the tree redrawn as it morphs. The `workload` package is the menagerie:
+deterministic batch shapes (nearly-sorted, reversed, sawtooth, duplicate-heavy, Zipf,
+jittered timestamps) and live regimes for feeding either engine anything you can name.
 Benchmarks: `WindowedFeedBenchmark` prices the ensemble window (`./gradlew jmh`). Hardening
 posture: `docs/hardening-audit-2026-07-08.md` (all findings remediated or documented).
 

@@ -27,6 +27,12 @@ public final class Demo {
             FullOrganismDemo.run();
             return;
         }
+        if (args.length > 0 && "aquarium".equals(args[0])) {
+            // The live tank: http://127.0.0.1:8077/ — SSE-streamed adaptation over an endless
+            // workload playlist. ./gradlew run --args="aquarium"
+            AquariumServer.run();
+            return;
+        }
         randomUniform();
         nearlySorted();
     }

@@ -1,0 +1,112 @@
+<!doctype html>
+<!-- Dashboard for PercentileService: polls /stats, charts the moving quantiles, and shows the
+     adaptive index (strategy + autopilot verdict) reacting to regime shifts. Vanilla canvas. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sliding-window percentiles · adaptive CSRBT</title>
+<style>
+  :root { --bg:#0b1220; --panel:#121b2e; --ink:#dbe6ff; --dim:#7f8db0; --acc:#5eead4; --warn:#f0c674; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 ui-monospace, Consolas, monospace; }
+  header { padding:12px 18px; background:var(--panel); display:flex; gap:24px; flex-wrap:wrap; align-items:baseline; }
+  header b { color:var(--acc); font-size:17px; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:1px; background:#223; }
+  .q { background:var(--panel); padding:14px; text-align:center; }
+  .q .label { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.12em; }
+  .q .val { font-size:26px; margin-top:4px; color:var(--acc); }
+  .q.hot .val { color:var(--warn); }
+  #meta { padding:8px 18px; color:var(--dim); border-bottom:1px solid #223; }
+  #meta em { color:var(--ink); font-style:normal; }
+  #chartWrap { height:calc(100vh - 210px); position:relative; }
+  canvas { width:100%; height:100%; display:block; }
+  #toggle { margin-left:auto; background:#1a2742; color:var(--ink); border:1px solid #2a3a5e;
+            border-radius:4px; padding:3px 10px; font:inherit; font-size:12px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <b>sliding-window percentiles</b>
+  <span>window: last <em id="window">—</em> observations · index: <em id="strategy">—</em></span>
+  <button id="toggle">demo traffic: …</button>
+</header>
+<div id="grid">
+  <div class="q"><div class="label">count</div><div class="val" id="count">—</div></div>
+  <div class="q"><div class="label">min</div><div class="val" id="min">—</div></div>
+  <div class="q"><div class="label">p50</div><div class="val" id="p50">—</div></div>
+  <div class="q"><div class="label">p90</div><div class="val" id="p90">—</div></div>
+  <div class="q"><div class="label">p95</div><div class="val" id="p95">—</div></div>
+  <div class="q hot"><div class="label">p99</div><div class="val" id="p99">—</div></div>
+  <div class="q"><div class="label">max</div><div class="val" id="max">—</div></div>
+</div>
+<div id="meta">autopilot: <em id="verdict">—</em> (<em id="cycles">0</em> cycles)</div>
+<div id="chartWrap"><canvas id="cv"></canvas></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const series = { p50: [], p95: [], p99: [] };   // rolling history for the chart
+const MAX_POINTS = 600;
+let demoOn = true;
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+addEventListener("resize", resize); resize();
+
+function push(name, v) {
+  if (v == null) return;
+  const s = series[name];
+  s.push(v);
+  if (s.length > MAX_POINTS) s.shift();
+}
+
+function draw() {
+  const w = cv.width / devicePixelRatio, h = cv.height / devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  const all = [...series.p50, ...series.p95, ...series.p99];
+  if (!all.length) return;
+  const max = Math.max(...all) * 1.1 || 1;
+  const colors = { p50: "#8fa4d4", p95: "#5eead4", p99: "#f0c674" };
+  for (const [name, s] of Object.entries(series)) {
+    if (s.length < 2) continue;
+    ctx.strokeStyle = colors[name]; ctx.lineWidth = name === "p99" ? 2 : 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < s.length; i++) {
+      const x = 8 + (w - 16) * i / (MAX_POINTS - 1);
+      const y = h - 8 - (h - 16) * s[i] / max;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = colors[name];
+    ctx.fillText(name, 12, 16 + 16 * Object.keys(colors).indexOf(name));
+  }
+}
+
+async function poll() {
+  try {
+    const m = await (await fetch("/stats")).json();
+    for (const k of ["count", "min", "p50", "p90", "p95", "p99", "max"]) {
+      $(k).textContent = m[k] == null ? "—" : m[k].toLocaleString();
+    }
+    $("window").textContent = m.window.toLocaleString();
+    $("strategy").textContent = m.strategy;
+    $("verdict").textContent = m.verdict;
+    $("cycles").textContent = m.pilotCycles;
+    demoOn = m.demoTraffic;
+    $("toggle").textContent = "demo traffic: " + (demoOn ? "on" : "off");
+    push("p50", m.p50); push("p95", m.p95); push("p99", m.p99);
+    draw();
+  } catch (e) { /* service restarting; keep polling */ }
+}
+$("toggle").onclick = async () => {
+  await fetch("/demo?on=" + !demoOn);
+  poll();
+};
+setInterval(poll, 500);
+poll();
+</script>
+</body>
+</html>

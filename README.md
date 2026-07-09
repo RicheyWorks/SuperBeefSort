@@ -139,6 +139,17 @@ exact-shadow nursery — with births, gate-kills, and promotions streaming throu
 `TreeEventBridge` onto the same observer as the sort events. (Honesty clause inherited from
 CSRBT's ADR-011: this tier is selection made observable, not a promised speedup.)
 
+**Autopilot + the percentile service.** `Autopilot` makes the self-operating index literal:
+wrap any adaptation tier, route traffic through its thread-safe front door, and it runs the
+morph/promotion/health cadence itself on a daemon scheduler (mutual exclusion preserves CSRBT's
+single-threaded control-plane contract; the anti-thrash gates stay in charge — autopilot adds a
+clock, never an opinion). Its first passenger: `./gradlew run --args="percentiles"` →
+`http://127.0.0.1:8078/`, a sliding-window quantile service — "p95 over the last 100k
+observations" in O(log n), duplicates kept via a `(value << 22) | seq` codec, quantiles charted
+live while the autopiloted index re-shapes itself to the traffic. `GET /observe?v=1234`,
+`/stats`, `/percentile?p=99`; a built-in steady/spike generator keeps the dashboard alive until
+your real traffic arrives.
+
 **See it run:** `./gradlew run --args="organism"` drives the whole organism — profile →
 born-optimal set → three live regimes (read-heavy, hot-key skew, drifting bounded stream) —
 and writes `docs/organism-session.json`, replayable in CSRBT's `demo/visualizer.html`.

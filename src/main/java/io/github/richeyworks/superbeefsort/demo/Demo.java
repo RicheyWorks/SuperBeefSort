@@ -33,6 +33,12 @@ public final class Demo {
             AquariumServer.run();
             return;
         }
+        if (args.length > 0 && "percentiles".equals(args[0])) {
+            // The useful body: sliding-window quantiles over an autopiloted adaptive index.
+            // http://127.0.0.1:8078/ — ./gradlew run --args="percentiles"
+            PercentileService.run();
+            return;
+        }
         randomUniform();
         nearlySorted();
     }

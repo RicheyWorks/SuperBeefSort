@@ -53,6 +53,34 @@ public final class AquariumServer {
     private final AtomicLong removes = new AtomicLong();
     private final AtomicLong evicts = new AtomicLong();
 
+    // ── The DJ booth: browser-requested regimes, handed to the driver thread ────────────────
+    // The HTTP thread only sets the reference; the driver polls it between op bursts and owns
+    // all actual mutation — the single-mutator contract is never crossed.
+    private final java.util.concurrent.atomic.AtomicReference<Regime> requested = new java.util.concurrent.atomic.AtomicReference<>();
+    private final java.util.Map<String, java.util.function.Supplier<Regime>> djBooth = new java.util.LinkedHashMap<>();
+    private final AtomicLong djSeed = new AtomicLong(9_000);   // fresh key streams per request
+
+    private void stockDjBooth() {
+        djBooth.put("read-heavy", () -> Workloads.readHeavyUniform(15_000, 60_000, djSeed.incrementAndGet()));
+        djBooth.put("hot-key", () -> Workloads.hotKeySkew(15_000, 8, 60_000, djSeed.incrementAndGet()));
+        djBooth.put("zipf", () -> Workloads.zipfRead(15_000, 60_000, 1.1, djSeed.incrementAndGet()));
+        djBooth.put("write-burst", () -> Workloads.writeBurst(15_000, 60_000, djSeed.incrementAndGet()));
+        djBooth.put("windowed-climb", () -> Workloads.windowedClimb(15_000, 8_000, djSeed.incrementAndGet()));
+        djBooth.put("window-off", () -> new Regime("window off (steady churn)", 10_000, 0.60, 0.5,
+                Workloads.uniformKeys(60_000, djSeed.incrementAndGet()), 0));
+    }
+
+    private String menuJson() {
+        StringBuilder sb = new StringBuilder("{\"t\":\"menu\",\"regimes\":[");
+        boolean first = true;
+        for (String name : djBooth.keySet()) {
+            if (!first) sb.append(',');
+            sb.append('"').append(name).append('"');
+            first = false;
+        }
+        return sb.append("]}").toString();
+    }
+
     public static void run() {
         try {
             new AquariumServer().start();
@@ -90,8 +118,10 @@ public final class AquariumServer {
             t.setDaemon(true);
             return t;
         }));
+        stockDjBooth();
         http.createContext("/", this::servePage);
         http.createContext("/events", this::serveEvents);
+        http.createContext("/dj", this::serveDj);
         http.start();
         System.out.println("Aquarium open: http://127.0.0.1:" + PORT + "/  (Ctrl+C to drain the tank)");
 
@@ -105,39 +135,63 @@ public final class AquariumServer {
         Random mix = new Random(7);
         long op = 0;
         List<Regime> playlist = Workloads.aquariumPlaylist(1_000);
-        for (int lap = 0; ; lap++) {
-            for (Regime regime : playlist) {
-                if (regime.window() >= 0) {
-                    set.setMaxSize(regime.window());
+        int track = 0;
+        while (true) {
+            // DJ requests preempt the playlist; otherwise the next track plays.
+            Regime djPick = requested.getAndSet(null);
+            boolean dj = djPick != null;
+            Regime regime = dj ? djPick : playlist.get(track++ % playlist.size());
+            int lap = track / Math.max(1, playlist.size());
+
+            if (regime.window() >= 0) {
+                set.setMaxSize(regime.window());
+            }
+            publish("{\"t\":\"regime\",\"name\":\"" + esc(regime.name()) + "\",\"ops\":" + regime.ops()
+                    + ",\"window\":" + set.getMaxSize() + ",\"lap\":" + lap
+                    + ",\"dj\":" + dj + "}");
+            for (int i = 1; i <= regime.ops(); i++) {
+                int key = regime.keys().getAsInt();
+                if (mix.nextDouble() < regime.readFraction()) {
+                    adaptation.contains(key);                      // measured walk -> real depth
+                } else if (mix.nextDouble() < regime.addBias()) {
+                    adaptation.add(key);                           // measured rotations
+                } else {
+                    adaptation.remove(key);
                 }
-                publish("{\"t\":\"regime\",\"name\":\"" + esc(regime.name()) + "\",\"ops\":" + regime.ops()
-                        + ",\"window\":" + set.getMaxSize() + ",\"lap\":" + lap + "}");
-                for (int i = 1; i <= regime.ops(); i++) {
-                    int key = regime.keys().getAsInt();
-                    if (mix.nextDouble() < regime.readFraction()) {
-                        adaptation.contains(key);                      // measured walk -> real depth
-                    } else if (mix.nextDouble() < regime.addBias()) {
-                        adaptation.add(key);                           // measured rotations
-                    } else {
-                        adaptation.remove(key);
-                    }
-                    op++;
-                    if (op % STATS_EVERY == 0) {
-                        publishStats(op, set, regime);
-                    }
-                    if (op % STATE_EVERY == 0) {
-                        publish("{\"t\":\"state\",\"strategy\":\"" + strategyOf(set)
-                                + "\",\"state\":" + snapshot(set) + "}");
-                    }
-                    if (op % ADAPT_EVERY == 0) {
-                        MorphController.MorphResult r = adaptation.maybeAdapt();
-                        publish("{\"t\":\"eval\",\"op\":" + op + ",\"morphed\":" + r.morphed()
-                                + ",\"from\":\"" + r.from() + "\",\"to\":\"" + r.to()
-                                + "\",\"reason\":\"" + esc(r.reason()) + "\"}");
-                    }
+                op++;
+                if (op % STATS_EVERY == 0) {
+                    publishStats(op, set, regime);
+                }
+                if (op % STATE_EVERY == 0) {
+                    publish("{\"t\":\"state\",\"strategy\":\"" + strategyOf(set)
+                            + "\",\"state\":" + snapshot(set) + "}");
+                }
+                if (op % ADAPT_EVERY == 0) {
+                    MorphController.MorphResult r = adaptation.maybeAdapt();
+                    publish("{\"t\":\"eval\",\"op\":" + op + ",\"morphed\":" + r.morphed()
+                            + ",\"from\":\"" + r.from() + "\",\"to\":\"" + r.to()
+                            + "\",\"reason\":\"" + esc(r.reason()) + "\"}");
+                }
+                if (i % 250 == 0 && requested.get() != null) {
+                    break;   // a DJ pick mid-regime: cut this track short, responsively
                 }
             }
         }
+    }
+
+    /** GET /dj?name=<regime>: queue a booth regime; the driver picks it up within ~250 ops. */
+    private void serveDj(HttpExchange ex) throws IOException {
+        String query = ex.getRequestURI().getQuery();
+        String name = (query != null && query.startsWith("name="))
+                ? java.net.URLDecoder.decode(query.substring(5), StandardCharsets.UTF_8) : "";
+        var factory = djBooth.get(name);
+        if (factory == null) {
+            ex.sendResponseHeaders(404, -1);
+        } else {
+            requested.set(factory.get());
+            ex.sendResponseHeaders(204, -1);
+        }
+        ex.close();
     }
 
     private void publishStats(long op, OrderedSet<Integer> set, Regime regime) {
@@ -203,6 +257,7 @@ public final class AquariumServer {
         clients.add(q);
         try (OutputStream out = ex.getResponseBody()) {
             out.write("retry: 2000\n\n".getBytes(StandardCharsets.UTF_8));
+            out.write(("data: " + menuJson() + "\n\n").getBytes(StandardCharsets.UTF_8));   // the DJ menu
             out.flush();
             while (true) {
                 String msg = q.take();

@@ -110,6 +110,70 @@ class WorkloadsTest {
     }
 
     @Test
+    void organPipeAscendsThenDescends() {
+        List<Integer> data = Workloads.organPipe(1_000);
+        int peak = data.indexOf(data.stream().mapToInt(Integer::intValue).max().orElseThrow());
+        for (int i = 1; i <= peak; i++) {
+            assertTrue(data.get(i - 1) <= data.get(i), "ascending flank broken at " + i);
+        }
+        for (int i = peak + 1; i < data.size(); i++) {
+            assertTrue(data.get(i - 1) >= data.get(i), "descending flank broken at " + i);
+        }
+    }
+
+    @Test
+    void zigzagHasNoRunLongerThanTwo() {
+        List<Integer> data = Workloads.zigzag(1_000);
+        int run = 1;
+        for (int i = 1; i < data.size(); i++) {
+            run = data.get(i - 1) <= data.get(i) ? run + 1 : 1;
+            assertTrue(run <= 2, "an ascending run survived at " + i);
+        }
+    }
+
+    @Test
+    void allEqualIsExactlyThat() {
+        assertEquals(1, new HashSet<>(Workloads.allEqual(500, 7)).size());
+    }
+
+    @Test
+    void stringShapesHaveTheirFingerprints() {
+        // paths: heavy shared prefixes — every entry starts with the same first segment shape.
+        for (String p : Workloads.paths(200, 3, 4, 1L)) {
+            assertTrue(p.startsWith("/seg"), "path shape broken: " + p);
+            assertTrue(p.contains("/leaf"));
+        }
+        // paddedNumbers: fixed width, so byte order IS numeric order (radix's best case).
+        List<String> nums = Workloads.paddedNumbers(500, 8, 2L);
+        for (String s : nums) {
+            assertEquals(8, s.length());
+        }
+        List<String> sorted = new java.util.ArrayList<>(nums);
+        sorted.sort(String::compareTo);
+        List<String> numeric = new java.util.ArrayList<>(nums);
+        numeric.sort(java.util.Comparator.comparingLong(Long::parseLong));
+        assertEquals(numeric, sorted, "byte order must equal numeric order for padded keys");
+        // uuids: canonical 36-char layout; words: 3..12 lowercase.
+        for (String u : Workloads.uuids(100, 3L)) {
+            assertEquals(36, u.length());
+        }
+        for (String w : Workloads.words(500, 4L)) {
+            assertTrue(w.length() >= 3 && w.length() <= 12 && w.chars().allMatch(Character::isLowerCase));
+        }
+    }
+
+    @Test
+    void zipfKeyStreamIsHeadHeavy() {
+        IntSupplier keys = Workloads.zipfKeys(1_000, 1.1, 8L);
+        Map<Integer, Integer> freq = new HashMap<>();
+        for (int i = 0; i < 30_000; i++) {
+            freq.merge(keys.getAsInt(), 1, Integer::sum);
+        }
+        assertTrue(freq.getOrDefault(0, 0) > 5 * Math.max(1, freq.getOrDefault(100, 0)),
+                "rank 0 must dwarf rank 100 in the stream too");
+    }
+
+    @Test
     void regimeValidatesItsContract() {
         assertThrows(IllegalArgumentException.class,
                 () -> Regime.of("bad", 0, 0.5, 0.5, () -> 1));

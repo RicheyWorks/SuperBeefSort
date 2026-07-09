@@ -135,6 +135,98 @@ public final class Workloads {
         return out;
     }
 
+    // ── Adversarial shapes (the anti-sorted menagerie wing) ─────────────────────────────────
+
+    /** Organ pipe: ascend to the middle, descend back — one long run that betrays run-extenders. */
+    public static List<Integer> organPipe(int n) {
+        List<Integer> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            out.add(Math.min(i, n - 1 - i));
+        }
+        return out;
+    }
+
+    /** Zigzag low-high alternation: every run has length 1 — maximal hostility to run detection. */
+    public static List<Integer> zigzag(int n) {
+        List<Integer> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            out.add((i & 1) == 0 ? i / 2 : n - 1 - i / 2);
+        }
+        return out;
+    }
+
+    /** Every element equal — the degenerate duplicate case (stability and dedup food). */
+    public static List<Integer> allEqual(int n, int value) {
+        List<Integer> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            out.add(value);
+        }
+        return out;
+    }
+
+    // ── String shapes (byte-sequence / MSD-radix food) ──────────────────────────────────────
+
+    /**
+     * URL-ish paths with heavy shared prefixes ({@code /segNN/segNN/.../leafNNN}) — the shape MSD
+     * radix loves (early bytes discriminate slowly, then fan out) and comparison sorts pay
+     * long-common-prefix tax on.
+     */
+    public static List<String> paths(int n, int depth, int fanout, long seed) {
+        if (depth < 1 || fanout < 1) throw new IllegalArgumentException("depth/fanout must be >= 1");
+        Random rnd = new Random(seed);
+        List<String> out = new ArrayList<>(n);
+        StringBuilder sb = new StringBuilder(depth * 8);
+        for (int i = 0; i < n; i++) {
+            sb.setLength(0);
+            for (int d = 0; d < depth; d++) {
+                sb.append("/seg").append(rnd.nextInt(fanout));
+            }
+            sb.append("/leaf").append(rnd.nextInt(1_000));
+            out.add(sb.toString());
+        }
+        return out;
+    }
+
+    /** Deterministic pseudo-UUIDs (hex-8-4-4-4-12) — uniformly distributed early bytes. */
+    public static List<String> uuids(int n, long seed) {
+        Random rnd = new Random(seed);
+        List<String> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            out.add(String.format("%08x-%04x-%04x-%04x-%012x",
+                    rnd.nextInt(), rnd.nextInt(1 << 16), rnd.nextInt(1 << 16),
+                    rnd.nextInt(1 << 16), rnd.nextLong() & 0xFFFFFFFFFFFFL));
+        }
+        return out;
+    }
+
+    /** Zero-padded fixed-width numerics — byte order equals numeric order, radix's best case. */
+    public static List<String> paddedNumbers(int n, int width, long seed) {
+        if (width < 1 || width > 18) throw new IllegalArgumentException("width must be in [1,18]");
+        Random rnd = new Random(seed);
+        long bound = (long) Math.pow(10, width);
+        List<String> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            out.add(String.format("%0" + width + "d", Math.floorMod(rnd.nextLong(), bound)));
+        }
+        return out;
+    }
+
+    /** Variable-length lowercase words (3–12 chars) — the mixed-length dictionary shape. */
+    public static List<String> words(int n, long seed) {
+        Random rnd = new Random(seed);
+        List<String> out = new ArrayList<>(n);
+        StringBuilder sb = new StringBuilder(12);
+        for (int i = 0; i < n; i++) {
+            sb.setLength(0);
+            int len = 3 + rnd.nextInt(10);
+            for (int c = 0; c < len; c++) {
+                sb.append((char) ('a' + rnd.nextInt(26)));
+            }
+            out.add(sb.toString());
+        }
+        return out;
+    }
+
     // ── Key streams (endless per-op key sources for regimes) ───────────────────────────────
 
     /** Endless uniform keys over {@code [0, keySpace)}. */
@@ -154,6 +246,34 @@ public final class Workloads {
             hot[i] = rnd.nextInt(keySpace);
         }
         return () -> rnd.nextDouble() < hotFraction ? hot[rnd.nextInt(hot.length)] : rnd.nextInt(keySpace);
+    }
+
+    /**
+     * Endless Zipf(s)-distributed keys over {@code [0, keySpace)} — the stream twin of
+     * {@link #zipf}: head-heavy access with a long tail, the shape real caches and hot rows show.
+     */
+    public static IntSupplier zipfKeys(int keySpace, double s, long seed) {
+        if (keySpace < 1 || keySpace > (1 << 20)) {
+            throw new IllegalArgumentException("keySpace must be in [1, 2^20]: " + keySpace);
+        }
+        double[] cdf = new double[keySpace];
+        double sum = 0.0;
+        for (int r = 1; r <= keySpace; r++) {
+            sum += 1.0 / Math.pow(r, s);
+            cdf[r - 1] = sum;
+        }
+        double total = sum;
+        Random rnd = new Random(seed);
+        return () -> {
+            double u = rnd.nextDouble() * total;
+            int lo = 0;
+            int hi = keySpace - 1;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (cdf[mid] < u) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        };
     }
 
     /** Endless monotonically climbing keys with jitter — the append regime; pairs with a window. */
@@ -193,6 +313,11 @@ public final class Workloads {
     /** Balanced churn over a mid-sized key space — the "nothing special" control regime. */
     public static Regime steadyChurn(int ops, int keySpace, long seed) {
         return Regime.of("steady churn", ops, 0.50, 0.5, uniformKeys(keySpace, seed));
+    }
+
+    /** ~80% Zipf-distributed reads: head-heavy skew with a long tail — between uniform and hot-set. */
+    public static Regime zipfRead(int ops, int keySpace, double s, long seed) {
+        return Regime.of("zipf reads (s=" + s + ")", ops, 0.80, 0.5, zipfKeys(keySpace, s, seed));
     }
 
     /** The default aquarium playlist: one lap through every habitat, then the window comes off. */

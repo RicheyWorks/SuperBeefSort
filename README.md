@@ -146,9 +146,13 @@ and writes `docs/organism-session.json`, replayable in CSRBT's `demo/visualizer.
 `http://127.0.0.1:8077/` — an adaptive set swimming through an endless
 [`Workloads.aquariumPlaylist`](src/main/java/io/github/richeyworks/superbeefsort/workload/Workloads.java)
 (read-heavy → hot-key skew → write burst → windowed climb), every control-plane decision
-streamed over SSE and the tree redrawn as it morphs. The `workload` package is the menagerie:
-deterministic batch shapes (nearly-sorted, reversed, sawtooth, duplicate-heavy, Zipf,
-jittered timestamps) and live regimes for feeding either engine anything you can name.
+streamed over SSE and the tree redrawn as it morphs — and a **DJ booth**: buttons that queue
+any regime live (the driver switches within ~250 ops), so you can steer the workload and watch
+the control plane react. The `workload` package is the menagerie: deterministic batch shapes
+(nearly-sorted, reversed, sawtooth, duplicate-heavy, Zipf, jittered timestamps), adversaries
+(organ pipe, zigzag, all-equal), string shapes for the MSD-radix path (shared-prefix paths,
+UUIDs, zero-padded numerics, words), and live key streams/regimes for feeding either engine
+anything you can name.
 Benchmarks: `WindowedFeedBenchmark` prices the ensemble window (`./gradlew jmh`). Hardening
 posture: `docs/hardening-audit-2026-07-08.md` (all findings remediated or documented).
 

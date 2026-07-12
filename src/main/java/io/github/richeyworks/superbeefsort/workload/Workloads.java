@@ -1,5 +1,12 @@
 package io.github.richeyworks.superbeefsort.workload;
 
+import io.github.richeyworks.superbeefsort.source.MiniJson;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -318,6 +325,71 @@ public final class Workloads {
     /** ~80% Zipf-distributed reads: head-heavy skew with a long tail — between uniform and hot-set. */
     public static Regime zipfRead(int ops, int keySpace, double s, long seed) {
         return Regime.of("zipf reads (s=" + s + ")", ops, 0.80, 0.5, zipfKeys(keySpace, s, seed));
+    }
+
+    /**
+     * A {@link Regime} that replays a recorded trace (see {@link TraceRecorder}) so the aquarium
+     * can eat a <em>real</em> access pattern instead of a synthesized one. The trace's keys become
+     * a cyclic key stream (wrapping back to the start when exhausted) and its op counts set the
+     * regime's aggregate mix: {@code readFraction} = fraction of {@code contains} ops,
+     * {@code addBias} = {@code add} / ({@code add} + {@code remove}). {@code ops} is set to the
+     * trace length, so one regime pass replays the trace's key stream exactly once.
+     *
+     * <p>Because a {@link Regime} models an op <em>mix</em> (probabilities) rather than an explicit
+     * op <em>sequence</em>, the exact per-op pairing of key↔op is not preserved — the key order and
+     * the aggregate read/write/add shape are. For an exact op-by-op replay against a live set, use
+     * {@link TraceReplayer#replay} instead.
+     *
+     * @throws IllegalArgumentException if the trace has no ops
+     */
+    public static Regime fromTrace(Path path) throws IOException {
+        List<Integer> keys = new ArrayList<>();
+        int adds = 0;
+        int removes = 0;
+        int contains = 0;
+        try (BufferedReader in = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line;
+            long lineNumber = 0;
+            while ((line = in.readLine()) != null) {
+                lineNumber++;
+                if (line.isBlank()) {
+                    continue;
+                }
+                String op = MiniJson.field(line, "op");
+                String keyRaw = MiniJson.field(line, "key");
+                if (op == null || keyRaw == null) {
+                    throw new IOException("trace line " + lineNumber + " missing 'op' or 'key': " + line);
+                }
+                keys.add(Integer.parseInt(keyRaw.trim()));
+                switch (op) {
+                    case "add":      adds++;     break;
+                    case "remove":   removes++;  break;
+                    case "contains": contains++; break;
+                    default:
+                        throw new IOException("trace line " + lineNumber
+                                + " has unknown op '" + op + "': " + line);
+                }
+            }
+        }
+        int total = keys.size();
+        if (total == 0) {
+            throw new IllegalArgumentException("empty trace (no ops): " + path);
+        }
+        int[] keyArray = new int[total];
+        for (int i = 0; i < total; i++) {
+            keyArray[i] = keys.get(i);
+        }
+        int[] cursor = {0};
+        IntSupplier stream = () -> {
+            int i = cursor[0];
+            cursor[0] = (i + 1) % keyArray.length;      // cyclic; cursor never leaves [0, len)
+            return keyArray[i];
+        };
+        int writes = adds + removes;
+        double readFraction = (double) contains / total;
+        double addBias = (writes == 0) ? 0.5 : (double) adds / writes;
+        return Regime.of("trace(" + path.getFileName() + ", " + total + " ops)",
+                total, readFraction, addBias, stream);
     }
 
     /** The default aquarium playlist: one lap through every habitat, then the window comes off. */

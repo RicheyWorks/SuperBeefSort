@@ -136,6 +136,44 @@ public final class EnsembleAdaptation<K> {
         return controller.contains(key);
     }
 
+    // -- raw observation hooks (parity with WorkloadAdaptation): for callers that serve the
+    //    operation themselves (e.g. a range walk or an entry-returning lookup the boolean facade
+    //    can't express) but still owe the monitor the signal and the policy its cooldown ops --
+
+    /**
+     * Report a lookup served outside this adapter: {@code keyHash} feeds the skew sketch,
+     * {@code depthTouched} the realized search depth ({@code 0} = unmeasured — never fabricate).
+     * Counts toward the promotion policy's ops-elapsed cooldown exactly like {@link #contains}.
+     */
+    public void recordSearch(int keyHash, int depthTouched) {
+        monitor.recordSearch(keyHash, depthTouched);
+        opsSinceEval++;
+    }
+
+    /** Report an insertion applied outside this adapter (e.g. a bulk repoint). */
+    public void recordAdd(int keyHash) {
+        monitor.recordAdd(keyHash, 0);
+        opsSinceEval++;
+    }
+
+    /** Report a removal applied outside this adapter. */
+    public void recordRemove(int keyHash) {
+        monitor.recordRemove(keyHash, 0);
+        opsSinceEval++;
+    }
+
+    /**
+     * Fold an already-completed bulk feed into the monitor as the write burst it was — one
+     * {@code recordAdd} per fed key (O(1) each; the rolling monitor is a sketch). The ensemble
+     * mirror of {@link WorkloadAdaptation#recordFeed}: without it the first {@link #maybePromote()}
+     * after a bulk load evaluates an EMPTY workload.
+     */
+    public void recordFeed(Iterable<K> fedKeys) {
+        for (K k : fedKeys) {
+            recordAdd(Objects.hashCode(k));
+        }
+    }
+
     /**
      * Let CSRBT evaluate the live workload and promote the read path to the cheapest <em>available</em>
      * member if the policy gates clear (an O(1) primary swap). The "ops elapsed" handed to the policy is

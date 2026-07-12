@@ -166,6 +166,35 @@ public final class EvolutionAdaptation<K> {
         return (search != null) ? search.contains(key) : evolution.contains(key);
     }
 
+    // -- raw observation hooks (parity with WorkloadAdaptation / EnsembleAdaptation): for callers
+    //    that serve the operation themselves but still owe the monitor the signal and the cycle
+    //    its traffic clock --
+
+    /** Report a lookup served outside this adapter (hash for the skew sketch; depth 0 = unmeasured). */
+    public void recordSearch(int keyHash, int depthTouched) {
+        monitor.recordSearch(keyHash, depthTouched);
+        opsSinceEval++;
+    }
+
+    /** Report an insertion applied outside this adapter. */
+    public void recordAdd(int keyHash) {
+        monitor.recordAdd(keyHash, 0);
+        opsSinceEval++;
+    }
+
+    /** Report a removal applied outside this adapter. */
+    public void recordRemove(int keyHash) {
+        monitor.recordRemove(keyHash, 0);
+        opsSinceEval++;
+    }
+
+    /** Fold an already-completed bulk feed into the monitor as the write burst it was. */
+    public void recordFeed(Iterable<K> fedKeys) {
+        for (K k : fedKeys) {
+            recordAdd(Objects.hashCode(k));
+        }
+    }
+
     // -- the cycle --
 
     /**

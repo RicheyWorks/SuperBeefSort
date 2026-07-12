@@ -231,7 +231,7 @@ bottleneck (off-heap/Rust ADR); replicas want to serve stale-bounded reads with 
 
 1. [x] Phase 5: `smokehouse-benchmarks` JMH suite; baseline upsert/get/range/recovery/compaction — landed (`src/jmh`); it surfaced + got fixed a >64k-key warm-recovery ordering bug
 2. [~] Phase 5: `replace` seam — **measured, not cut** (remove+add ~15% of upsert; D1); mmap / drop-per-read-allocation — **motivated** by `get` > `upsert` (D2, still open)
-3. [ ] Phase 6: crash-fuzz harness (seeded kill-point injection, oracle reopen); manifest (advisory, generation-numbered); `backup()`/restore + point-in-time
+3. [x] Phase 6: append/torn-tail crash-fuzz (`CrashFuzzTest` — every truncation recovers to the LWW oracle; compaction-commit + hint crash windows stay covered by `Phase2Test`'s targeted tests); advisory generation-numbered manifest (`ManifestFile`, CRC-verified, atomic); `backup()`/`restore` built on it — all landed + tested
 4. [ ] Phase 7: tail primitive; `watch`/`watchRange`; `snapshot()` with segment pinning; generic `IntervalAugmentor` endpoints in CSRBT; dashboard event feed + trace-replay button
 5. [ ] Phase 8: replica protocol (JDK sockets, length-prefixed); bootstrap-from-backup + tail catch-up; lag metrics; dashboard replica panel
 6. [ ] Phase 9: GitHub Actions across the three repos; Maven Central publishing; the benchmarks essay

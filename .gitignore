@@ -9,3 +9,4 @@ build/
 # Phase 2 FFM PoC build artifacts
 phase2-ffm/*.so
 phase2-ffm/radixtest
+.claude/

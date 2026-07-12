@@ -70,16 +70,22 @@ justifying it.**
 
 | Option | Verdict |
 |---|---|
-| **A. `replace(probe, entry)` on the `NavigableOrderedSet` adapter: one descent, swap the element in place when compare-equal** | **Chosen, if JMH says so** — for `IndexEntry` upsert the key is unchanged, so the node's position is unchanged: no rebalance, no second descent |
-| B. Keep `remove` + `add` | Free; correct; the baseline the benchmark must beat by enough to matter |
+| A. `replace(probe, entry)` on the `NavigableOrderedSet` adapter: one descent, swap the element in place when compare-equal | **Not cut** — JMH said no (see the measured verdict below); the key is unchanged so it *would* be free of rebalance, but the win is too small to matter |
+| **B. Keep `remove` + `add`** | **Chosen** — remove+add is only ~15% of end-to-end upsert; the benchmark did not beat it by enough to matter |
 | C. A full `Map` face on CSRBT | Scope explosion; SmokeHouse already proved the set face suffices |
 
 The seam is *compare-equal element replacement*: legal precisely because the comparator ignores
 the location fields. It must be added at the adapter level (public API), survive morphs
 trivially (it never touches structure), and be rejected loudly for elements that don't
-compare-equal to the incumbent. If JMH shows remove+add is under ~15% of upsert cost end-to-end
-(the log append and fsync likely dominate), **option B stands and the seam is not cut** — the
-predecessor's discipline, kept.
+compare-equal to the incumbent.
+
+**Measured (Phase 5 JMH, n = 100 000, Red-Black — SmokeHouse `IndexUpsertBenchmark` +
+`StoreOpsBenchmark`):** the index-only `remove` + `add` costs **817 ns/op** against an end-to-end
+`upsert` of **~5 000–5 560 ns/op** — i.e. **~15%**, landing right on the gate, with the log append +
+fsync dominating exactly as predicted. A `replace` (one descent + an O(1) swap ≈ `locate`'s 138 ns)
+would save ~670 ns: a **~12% speedup on overwrites only**, nothing for fresh inserts, gets, or
+ranges. That does not justify a permanent public `replace` surface that every future morph strategy
+must honor. **Option B stands, the seam is not cut** — the predecessor's discipline, kept.
 
 ### D2: mmap reads for closed segments
 
@@ -88,6 +94,11 @@ grows). Zero-dep, JDK-only. Benchmark random `get` and range scans against the c
 seek+read before adopting; document the address-space cost. Unmap-on-compaction uses the
 documented-safe pattern (close the channel, drop the reference, let GC unmap — no
 `sun.misc.Unsafe`).
+
+**Phase 5 signal (now motivated, not speculative):** the baseline has `get` (~6.7 µs) *slower* than
+`upsert` (~5.6 µs) — the log read outweighs the append, and the read path allocates a fresh
+`InputStream` / `DataInputStream` / `BufferedInputStream` per call. So D2 — or simply eliminating
+that per-read allocation — is the empirically strongest lever Phase 5 turned up, ahead of D1's seam.
 
 ### Deferred, explicitly
 
@@ -218,8 +229,8 @@ bottleneck (off-heap/Rust ADR); replicas want to serve stale-bounded reads with 
 
 ## Action items
 
-1. [ ] Phase 5: `smokehouse-benchmarks` JMH suite; baseline upsert/get/range/recovery/compaction
-2. [ ] Phase 5: `replace` seam in CSRBT **iff** the upsert benchmark justifies it; mmap closed-segment reads iff reads do
+1. [x] Phase 5: `smokehouse-benchmarks` JMH suite; baseline upsert/get/range/recovery/compaction — landed (`src/jmh`); it surfaced + got fixed a >64k-key warm-recovery ordering bug
+2. [~] Phase 5: `replace` seam — **measured, not cut** (remove+add ~15% of upsert; D1); mmap / drop-per-read-allocation — **motivated** by `get` > `upsert` (D2, still open)
 3. [ ] Phase 6: crash-fuzz harness (seeded kill-point injection, oracle reopen); manifest (advisory, generation-numbered); `backup()`/restore + point-in-time
 4. [ ] Phase 7: tail primitive; `watch`/`watchRange`; `snapshot()` with segment pinning; generic `IntervalAugmentor` endpoints in CSRBT; dashboard event feed + trace-replay button
 5. [ ] Phase 8: replica protocol (JDK sockets, length-prefixed); bootstrap-from-backup + tail catch-up; lag metrics; dashboard replica panel

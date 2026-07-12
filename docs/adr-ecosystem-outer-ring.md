@@ -154,6 +154,15 @@ this is an embedded store, not MVCC; documented, not hidden.
 longs in SmokeHouse's interval index. Backward-compatible; the int-bound path stays as the
 specialization. Lands in CSRBT with its own oracle tests before SmokeHouse consumes it.
 
+> **Implementation note (found while scoping, 2026-07-12).** The blocker is `TreeNode1.augmentedValue`
+> being a plain `int` — it cannot hold a generic (or even `long`) subtree max-hi, which is precisely
+> why the current `IntervalAugmentor` is `int`-bound. The clean, backward-compatible path is an
+> *additive* generic slot on `TreeNode1` (`Object augmentedRef`, copied in `clone()`, leaving the
+> `int augmentedValue` and every existing augmentor — order statistics, the int interval augmentor —
+> untouched), plus a `Comparator`-parameterized `IntervalAugmentor<E>` that stores each node's
+> `{hi, maxHi}` in that slot and prunes via the comparator. Deferred to its own focused, tested effort
+> because it reaches into CSRBT's core node, which SmokeHouse and SuperBeefSort both depend on.
+
 ## Phase 8 — The replication ring
 
 ### D3: Replication model
@@ -232,7 +241,7 @@ bottleneck (off-heap/Rust ADR); replicas want to serve stale-bounded reads with 
 1. [x] Phase 5: `smokehouse-benchmarks` JMH suite; baseline upsert/get/range/recovery/compaction — landed (`src/jmh`); it surfaced + got fixed a >64k-key warm-recovery ordering bug
 2. [~] Phase 5: `replace` seam — **measured, not cut** (remove+add ~15% of upsert; D1); mmap / drop-per-read-allocation — **motivated** by `get` > `upsert` (D2, still open)
 3. [x] Phase 6: append/torn-tail crash-fuzz (`CrashFuzzTest` — every truncation recovers to the LWW oracle; compaction-commit + hint crash windows stay covered by `Phase2Test`'s targeted tests); advisory generation-numbered manifest (`ManifestFile`, CRC-verified, atomic); `backup()`/`restore` built on it — all landed + tested
-4. [ ] Phase 7: tail primitive; `watch`/`watchRange`; `snapshot()` with segment pinning; generic `IntervalAugmentor` endpoints in CSRBT; dashboard event feed + trace-replay button
+4. [~] Phase 7: tail primitive, `watch`/`watchRange`, and `snapshot()` with segment pinning — **landed + tested** (`Tail`/`TailTest`, `WatchTest`, `SnapshotTest`); still open — generic (typed) `IntervalAugmentor` endpoints in CSRBT (see the implementation note in §Phase 7) and the dashboard event feed + trace-replay button
 5. [ ] Phase 8: replica protocol (JDK sockets, length-prefixed); bootstrap-from-backup + tail catch-up; lag metrics; dashboard replica panel
 6. [ ] Phase 9: GitHub Actions across the three repos; Maven Central publishing; the benchmarks essay
 7. [ ] Confirm the name *outer ring* or rename before Phase 5 starts

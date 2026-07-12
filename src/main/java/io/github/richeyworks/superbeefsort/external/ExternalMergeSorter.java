@@ -7,6 +7,7 @@ import io.github.richeyworks.superbeefsort.feed.CsrbtTarget;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -126,22 +127,120 @@ public final class ExternalMergeSorter<K> {
         return new ExternalSortResult(n, numRuns, passes, System.nanoTime() - t0);
     }
 
+    /**
+     * Streaming twin of {@link #sortToList(List)}: sort an {@link Iterator} whose elements never
+     * all fit in memory. Run generation pulls {@code runSize} elements at a time, so only one
+     * chunk is resident during the sort; the merged result is still materialised in memory (use
+     * {@link #sortAndFeed(Iterator, CsrbtTarget, int)} for the fully out-of-core path). The
+     * iterator is consumed exactly once and left exhausted.
+     */
+    public List<K> sortToList(Iterator<K> input) throws IOException {
+        List<SpillFile<K>> runs = generateRuns(input, new int[1]);
+        List<SpillFile<K>> finalRuns = mergePasses(runs);
+        List<SpillReader<K>> readers = openReaders(finalRuns);
+        TournamentTree<K> tree = new TournamentTree<>(readers, comparator);
+        List<K> result = new ArrayList<>();
+        try {
+            while (tree.hasNext()) {
+                result.add(tree.next());
+            }
+        } finally {
+            tree.closeAll();
+            for (SpillFile<K> f : finalRuns) {
+                f.delete();
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Streaming twin of {@link #sortAndFeed(List, CsrbtTarget, int)} — the fully out-of-core
+     * ingestion path: neither the input nor the merged output is ever fully resident. Run
+     * generation streams the {@code input} iterator in {@code runSize} chunks; the tournament tree
+     * then streams the merged output straight into {@code target}. The {@code maxSize} window rule
+     * is identical (a windowless target is rejected when {@code maxSize > 0}). The element count in
+     * the returned {@link ExternalSortResult} is tallied as the iterator is drained.
+     *
+     * @throws IllegalArgumentException if {@code maxSize > 0} and the target has no window
+     */
+    public ExternalSortResult sortAndFeed(Iterator<K> input, CsrbtTarget<K> target, int maxSize)
+            throws IOException {
+        if (maxSize > 0 && !target.supportsWindow()) {
+            throw new IllegalArgumentException(
+                    "bounded external feed (maxSize=" + maxSize + ") requires a windowed target "
+                    + "(an OrderedSet); this target does not support setMaxSize. "
+                    + "Feed unbounded, or feed into an OrderedSet.");
+        }
+        long t0 = System.nanoTime();
+        int[] count = new int[1];
+        List<SpillFile<K>> runs = generateRuns(input, count);
+        int numRuns = runs.size();
+        List<SpillFile<K>> finalRuns = mergePasses(runs);
+        int passes = countPasses(numRuns);
+
+        List<SpillReader<K>> readers = openReaders(finalRuns);
+        TournamentTree<K> tree = new TournamentTree<>(readers, comparator);
+        try {
+            if (maxSize > 0) {
+                target.setMaxSize(maxSize);
+            }
+            while (tree.hasNext()) {
+                target.add(tree.next());
+            }
+        } finally {
+            tree.closeAll();
+            for (SpillFile<K> f : finalRuns) {
+                f.delete();
+            }
+        }
+        return new ExternalSortResult(count[0], numRuns, passes, System.nanoTime() - t0);
+    }
+
     // ---- run generation ----
 
     private List<SpillFile<K>> generateRuns(List<K> input) throws IOException {
         List<SpillFile<K>> spills = new ArrayList<>();
         for (int from = 0; from < input.size(); from += runSize) {
             int to = Math.min(input.size(), from + runSize);
-            List<K> sorted = engine.sort(input.subList(from, to), comparator, jobSpec).sorted();
-            SpillFile<K> spill = SpillFile.create(serializer, spillDir);
-            spills.add(spill);
-            try (SpillWriter<K> w = spill.writer()) {
-                for (K element : sorted) {
-                    w.write(element);
-                }
-            }
+            spills.add(spillSortedChunk(input.subList(from, to)));
         }
         return spills;
+    }
+
+    /**
+     * Run generation from a streaming iterator: fill a {@code runSize} buffer, sort + spill it,
+     * repeat until the iterator is exhausted. {@code countOut[0]} receives the total element count
+     * (the iterator has no known size up front).
+     */
+    private List<SpillFile<K>> generateRuns(Iterator<K> input, int[] countOut) throws IOException {
+        List<SpillFile<K>> spills = new ArrayList<>();
+        List<K> chunk = new ArrayList<>();
+        int count = 0;
+        while (input.hasNext()) {
+            chunk.add(input.next());
+            count++;
+            if (chunk.size() == runSize) {
+                spills.add(spillSortedChunk(chunk));
+                chunk = new ArrayList<>();
+            }
+        }
+        if (!chunk.isEmpty()) {
+            spills.add(spillSortedChunk(chunk));
+        }
+        countOut[0] = count;
+        return spills;
+    }
+
+    /** Sort one in-memory chunk with the full engine and spill it to a fresh run file. */
+    private SpillFile<K> spillSortedChunk(List<K> chunk) throws IOException {
+        List<K> sorted = engine.sort(chunk, comparator, jobSpec).sorted();
+        SpillFile<K> spill = SpillFile.create(serializer, spillDir);
+        try (SpillWriter<K> w = spill.writer()) {
+            for (K element : sorted) {
+                w.write(element);
+            }
+        }
+        return spill;
     }
 
     // ---- multi-pass merge ----

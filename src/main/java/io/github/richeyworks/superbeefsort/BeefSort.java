@@ -591,12 +591,13 @@ public final class BeefSort<K> {
      *                   {@link SpillSerializer#forLongs()}, {@link SpillSerializer#forIntegers()},
      *                   or {@link SpillSerializer#forStrings()} for the common types; supply a
      *                   custom one for other element types.
-     * @throws IllegalStateException if {@link #source(List)} has not been called.
+     * <p>A {@link List} source (via {@link #source(List)}) drives the list terminals
+     * ({@link ExternalSortBuilder#toList()} / {@link ExternalSortBuilder#feedInto}); the streaming
+     * terminals ({@link ExternalSortBuilder#toList(java.util.Iterator)} /
+     * {@link ExternalSortBuilder#feedFrom}) take their input iterator directly and need no list
+     * source. The list-source requirement is therefore checked at the list terminals, not here.
      */
     public ExternalSortBuilder external(SpillSerializer<K> serializer) {
-        if (source == null) {
-            throw new IllegalStateException("source not set — call source(list) before external()");
-        }
         return new ExternalSortBuilder(Objects.requireNonNull(serializer, "serializer"));
     }
 
@@ -654,7 +655,7 @@ public final class BeefSort<K> {
          * {@link #feedInto} to stream directly from the tournament tree into CSRBT.
          */
         public List<K> toList() throws IOException {
-            return sorter().sortToList(source);
+            return sorter().sortToList(requireSource());
         }
 
         /**
@@ -662,7 +663,7 @@ public final class BeefSort<K> {
          * materialising the full output in memory — the true out-of-core path.
          */
         public ExternalSortResult feedInto(OrderedSet<K> set) throws IOException {
-            return sorter().sortAndFeed(source, CsrbtTarget.of(set), 0);
+            return sorter().sortAndFeed(requireSource(), CsrbtTarget.of(set), 0);
         }
 
         /**
@@ -670,7 +671,47 @@ public final class BeefSort<K> {
          * / top-N semantics as {@link BeefSort#streaming(OrderedSet, int)} (0 = unbounded).
          */
         public ExternalSortResult feedInto(OrderedSet<K> set, int maxSize) throws IOException {
-            return sorter().sortAndFeed(source, CsrbtTarget.of(set), maxSize);
+            return sorter().sortAndFeed(requireSource(), CsrbtTarget.of(set), maxSize);
+        }
+
+        /**
+         * Streaming twin of {@link #toList()}: sort an {@link java.util.Iterator} whose elements
+         * never all fit in memory (e.g. a {@code RecordSource}'s key stream, or any generator),
+         * returning the merged result as a list. The iterator is consumed once. Needs no
+         * {@link #source(List)} — the input comes from the iterator.
+         */
+        public List<K> toList(java.util.Iterator<K> input) throws IOException {
+            return sorter().sortToList(Objects.requireNonNull(input, "input"));
+        }
+
+        /**
+         * Streaming twin of {@link #feedInto(OrderedSet)} — the fully out-of-core ingestion path:
+         * sort the {@code input} iterator in bounded runs and stream the merged output straight
+         * into {@code set}. Mirrors {@link #feedInto(OrderedSet)} but sourced from an iterator, so
+         * neither input nor output is ever fully resident.
+         */
+        public ExternalSortResult feedFrom(java.util.Iterator<K> input, OrderedSet<K> set)
+                throws IOException {
+            return sorter().sortAndFeed(Objects.requireNonNull(input, "input"), CsrbtTarget.of(set), 0);
+        }
+
+        /**
+         * As {@link #feedFrom(java.util.Iterator, OrderedSet)} but bounded to {@code maxSize} — the
+         * same sliding-window / top-N semantics as {@link #feedInto(OrderedSet, int)}
+         * (0 = unbounded).
+         */
+        public ExternalSortResult feedFrom(java.util.Iterator<K> input, OrderedSet<K> set, int maxSize)
+                throws IOException {
+            return sorter().sortAndFeed(Objects.requireNonNull(input, "input"), CsrbtTarget.of(set), maxSize);
+        }
+
+        private List<K> requireSource() {
+            if (source == null) {
+                throw new IllegalStateException(
+                        "source not set — call source(list) before a list terminal, or use the "
+                        + "iterator terminals toList(Iterator) / feedFrom(Iterator, ...)");
+            }
+            return source;
         }
 
         private ExternalMergeSorter<K> sorter() {

@@ -24,6 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * uniform read pressure makes AVL cheapest (strict balance → fewest comparisons); a single hot key makes
  * Splay cheapest (self-adjusts the hot key toward the root). A relaxed {@link MorphPolicy} removes the
  * production cooldown/margin so the morph fires inside the test.
+ *
+ * <p>Read-diet volumes are pinned to the 2026-07-14 scorer recalibration: {@code buildAdaptive} folds
+ * the construction feed (~2210 distinct keys) into the 4096-op rolling window as writes, and the
+ * recalibrated Hybrid undercuts AVL while {@code writeFraction > ~0.08} — the feed keeps w above that
+ * until ~7.2k subsequent reads have decayed it. Read diets therefore run 10k reads before expecting
+ * AVL, so the window genuinely reflects the "read-only" story each test tells. (Under production
+ * gates the feed residue never morphs anything — the near-tie is ~1% deep, inside the 20% margin —
+ * this is purely a zero-margin-test consideration.)
  */
 class WorkloadAdaptationTest {
 
@@ -66,8 +74,13 @@ class WorkloadAdaptationTest {
         WorkloadAdaptation<Integer> adapt = redBlackBornAdaptive();
         List<Integer> before = adapt.set().inOrder();
 
-        // Many distinct keys, read-only -> readFraction ~ 1.0, accessSkew ~ 0.0 -> AVL is cheapest.
-        for (int pass = 0; pass < 2; pass++) {
+        // Many distinct keys, read-only -> readFraction -> 1.0, accessSkew ~ 0.0 -> AVL is cheapest.
+        // Volume matters: buildAdaptive folds the ~2210-key construction feed into the 4096-op
+        // rolling window as writes, and post-recalibration (2026-07-14) Hybrid undercuts AVL while
+        // w > ~0.08 — true here until ~7.2k reads have decayed the feed. 10k reads land at
+        // w ~ 0.038, where AVL is cheapest again (0.3461 vs Hybrid 0.3472; RB 0.3699, a 6.4%
+        // RB->AVL improvement, so the relaxed policy's zero margin clears with room).
+        for (int pass = 0; pass < 5; pass++) {
             for (int k = 0; k < 2000; k++) {
                 adapt.recordSearch(k);
             }
@@ -96,8 +109,10 @@ class WorkloadAdaptationTest {
     @Test
     void onceOptimalItHoldsInsteadOfThrashing() {
         WorkloadAdaptation<Integer> adapt = redBlackBornAdaptive();
-        for (int k = 0; k < 2000; k++) {
-            adapt.recordSearch(k);
+        for (int pass = 0; pass < 5; pass++) { // 10k reads: decays the build feed below w ~ 0.08,
+            for (int k = 0; k < 2000; k++) {   // where AVL undercuts Hybrid (see the uniform test)
+                adapt.recordSearch(k);
+            }
         }
         assertTrue(adaptUntilMorph(adapt, 6)); // RB -> AVL
         assertEquals(StrategyId.AVL, adapt.currentStrategy());
@@ -133,10 +148,12 @@ class WorkloadAdaptationTest {
         assertEquals(StrategyId.AVL, adapt.currentStrategy(), "READ_HEAVY is born AVL");
 
         for (int pass = 0; pass < 3; pass++) {
-            for (int k = 0; k < 2000; k++) {
-                adapt.recordSearch(k); // uniform reads keep AVL cheapest -> no morph
+            for (int rep = 0; rep < 5; rep++) {  // 10k reads per pass: decays the build feed below
+                for (int k = 0; k < 2000; k++) { // the w ~ 0.08 Hybrid crossover BEFORE the first
+                    adapt.recordSearch(k);       // evaluation (w ~ 0.038, 0.003, 0.0003 per eval)
+                }
             }
-            adapt.maybeAdapt();
+            adapt.maybeAdapt(); // uniform reads keep AVL cheapest -> no morph
         }
 
         AdaptationReport report = adapt.adaptationReport();

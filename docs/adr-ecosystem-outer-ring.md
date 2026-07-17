@@ -162,6 +162,12 @@ specialization. Lands in CSRBT with its own oracle tests before SmokeHouse consu
 > untouched), plus a `Comparator`-parameterized `IntervalAugmentor<E>` that stores each node's
 > `{hi, maxHi}` in that slot and prunes via the comparator. Deferred to its own focused, tested effort
 > because it reaches into CSRBT's core node, which SmokeHouse and SuperBeefSort both depend on.
+>
+> **Landed (2026-07-14)** as scoped: `TreeNode1.augmentedRef` (immutable payloads, reference-copied
+> in `deepCopy`, carried across `setStrategy`/`selfRepair` like tags) + CSRBT's
+> `GenericIntervalAugmentor<E>`, oracle-tested at epoch-millis scale and with String endpoints —
+> see CSRBT `docs/CHANGELOG-2026-07-14-generic-interval-endpoints.md`. SmokeHouse consumption
+> (typed spans in `IndexedStore`) is the remaining follow-up.
 
 ## Phase 8 — The replication ring
 

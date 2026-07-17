@@ -96,6 +96,11 @@ jmh {
     jvmArgs.add("-Xmx4g")
 }
 
+// The jmh plugin doesn't hook the jmh source set into `build`/`check`, so a compile
+// break in a benchmark would only surface at the next manual jmh run. Feed it in.
+// (Mirrors csrbt-benchmarks.)
+tasks.named("check") { dependsOn(tasks.named("compileJmhJava")) }
+
 // Analytical report (not a wall-clock benchmark): prints the metered move/comparison growth curve for
 // merge / merge.inplace / merge.wiki, normalised to n*log2(n). Shows merge.wiki's O(n log n) moves
 // versus merge.inplace's O(n log^2 n). Run: ./gradlew moveCurve

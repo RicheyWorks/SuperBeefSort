@@ -1,6 +1,9 @@
 # ADR: Fifth-engine candidates — what plugs in next
 
-**Status:** Proposed
+**Status:** Accepted — both engines shipped 2026-07-18 ([Renderer](https://github.com/RicheyWorks/Renderer),
+[Brine](https://github.com/RicheyWorks/Brine)); the `resident()`/`champion()` seams landed in
+`csrbt-experimental` and the ADR-013 §4 publication trigger is formally fired (publishing itself
+remains a Phase 9 decision)
 **Date:** 2026-07-18
 **Deciders:** Richmond
 **Scope:** the whole ecosystem (CSRBT + SuperBeefSort + SmokeHouse + Carver)

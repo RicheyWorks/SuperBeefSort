@@ -3,6 +3,7 @@ import org.gradle.api.attributes.java.TargetJvmVersion
 plugins {
     `java-library`
     application
+    `maven-publish`   // Phase 9: local repo today; Central rides csrbt-core's release
     id("me.champeau.jmh") version "0.7.3" // JMH micro-benchmarks: ./gradlew jmh
 }
 
@@ -137,5 +138,36 @@ tasks.register<JavaExec>("phase4Corpus") {
     jvmArgs("-Xmx512m")
     if (JavaVersion.current() >= JavaVersion.VERSION_22) {
         jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
+}
+
+// Phase 9 (outer-ring ADR): make the ring locally installable — ./gradlew publishToMavenLocal.
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            artifactId = "superbeefsort"
+            from(components["java"])
+            pom {
+                name = "SuperBeefSort"
+                description = "A pluggable Java sorting engine: profile, select, sort, feed — the intake tract of the CSRBT ecosystem."
+                url = "https://github.com/RicheyWorks/SuperBeefSort"
+                licenses {
+                    license {
+                        name = "MIT License"
+                        url = "https://opensource.org/licenses/MIT"
+                    }
+                }
+                developers {
+                    developer {
+                        id = "RicheyWorks"
+                        name = "Richmond"
+                    }
+                }
+                scm {
+                    url = "https://github.com/RicheyWorks/SuperBeefSort"
+                    connection = "scm:git:https://github.com/RicheyWorks/SuperBeefSort.git"
+                }
+            }
+        }
     }
 }

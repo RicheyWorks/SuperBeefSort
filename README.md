@@ -268,6 +268,13 @@ ecosystem's ADR home ([the SmokeHouse ring](docs/adr-smokehouse-ecosystem-ring.m
 | [Renderer](https://github.com/RicheyWorks/Renderer) | the materialized-view engine — folds the store's tail into live ranked aggregates |
 | [Brine](https://github.com/RicheyWorks/Brine) | the adaptive cache — eviction policy evolved per workload |
 
+Engines 7–11 (2026-07-18, [ADR](docs/adr-seventh-engine-candidates.md)):
+[PitBoss](https://github.com/RicheyWorks/PitBoss) (replica-fleet conductor) ·
+[DryAge](https://github.com/RicheyWorks/DryAge) (time travel) ·
+[Twine](https://github.com/RicheyWorks/Twine) (crash-atomic batches) ·
+[SmokeSignal](https://github.com/RicheyWorks/SmokeSignal) (loopback wire) ·
+[Jerky](https://github.com/RicheyWorks/Jerky) (cold archives).
+
 Every repo builds against live sibling sources via nested composite builds, ships CI that
 checks the siblings out, and installs locally with `./gradlew publishToMavenLocal`.
 

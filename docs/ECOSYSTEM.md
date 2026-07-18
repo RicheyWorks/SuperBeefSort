@@ -1,6 +1,6 @@
 # The organism, mapped
 
-Eleven engines, one organism. Each engine is its own repository, composed by nested Gradle
+Twelve engines, one organism. Each engine is its own repository, composed by nested Gradle
 composite builds — clone them as siblings and every build resolves live sources. This page is
 the one map: what each engine is, how the data flows, and the doctrines every engine obeys.
 
@@ -19,6 +19,7 @@ the one map: what each engine is, how the data flows, and the doctrines every en
 | 9 | [Twine](https://github.com/RicheyWorks/Twine) | crash-atomic multi-key batches — journaled commit, idempotent replay | the store had no cross-key atomicity |
 | 10 | [SmokeSignal](https://github.com/RicheyWorks/SmokeSignal) | the wire — a loopback protocol face over the store | the store had no face beyond the JVM |
 | 11 | [Jerky](https://github.com/RicheyWorks/Jerky) | cold storage — compressed, CRC-verified backup archives | backups spend their lives cold |
+| 12 | [WholeHog](https://github.com/RicheyWorks/WholeHog) | the integration organism — every engine attached to one store, one composed oracle, the four-subscriber tail test | composition itself was the last unconsumed seam |
 
 ## The flow
 
@@ -76,7 +77,9 @@ replay, DryAge's restore.
 
 **Oracle tests, seeded and deterministic.** Every behavior is asserted against a brute-force
 reference (`TreeMap`, full-scan folds, hand-written best paths). The only timing concessions
-are bounded awaits where real threads exist.
+are bounded awaits where real threads exist. And since engine twelve, *composition itself*
+is oracle-tested: WholeHog runs every engine over one store against one reference — a new
+engine joins the organism by joining that suite.
 
 **Honest documentation of what doesn't work.** Non-goals are stated loudly (no consensus, no
 failover, no auth on the wire), negative results are published (the evolution machine's
@@ -87,7 +90,9 @@ verdict, the off-heap radix verdict), and deferred work carries named re-arming 
 Ecosystem-scope decisions live in this directory: the
 [SmokeHouse ring](adr-smokehouse-ecosystem-ring.md) (engines 1–3, phases 1–4), the
 [outer ring](adr-ecosystem-outer-ring.md) (phases 5–9), the
-[fifth-engine candidates](adr-fifth-engine-candidates.md) (engines 4–6), and the
-[seventh-engine candidates](adr-seventh-engine-candidates.md) (engines 7–11).
+[fifth-engine candidates](adr-fifth-engine-candidates.md) (engines 4–6), the
+[seventh-engine candidates](adr-seventh-engine-candidates.md) (engines 7–11), and the
+[twelfth engine](adr-twelfth-engine-wholehog.md) (WholeHog — with Rub and Sizzle as its
+named successors, re-armed by what it finds).
 CSRBT-internal decisions (ADR-001…013) live in
 [CSRBT/docs](https://github.com/RicheyWorks/CSRBT/tree/main/docs).

@@ -274,6 +274,7 @@ Engines 7–11 (2026-07-18, [ADR](docs/adr-seventh-engine-candidates.md)):
 [Twine](https://github.com/RicheyWorks/Twine) (crash-atomic batches) ·
 [SmokeSignal](https://github.com/RicheyWorks/SmokeSignal) (loopback wire) ·
 [Jerky](https://github.com/RicheyWorks/Jerky) (cold archives).
+Engine 12: [WholeHog](https://github.com/RicheyWorks/WholeHog) — the integration organism: all of them, composed and asserted together.
 
 Every repo builds against live sibling sources via nested composite builds, ships CI that
 checks the siblings out, and installs locally with `./gradlew publishToMavenLocal`.

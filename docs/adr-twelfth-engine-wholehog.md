@@ -1,6 +1,9 @@
 # ADR: The twelfth engine — WholeHog, or what "more" means at eleven
 
-**Status:** Proposed
+**Status:** Accepted — built 2026-07-18 ([WholeHog](https://github.com/RicheyWorks/WholeHog)).
+First finding landed before the first build: composing Twine over an `IndexedStore` exposed
+the missing write seam, and Twine gained `PutSink`/`DeleteSink` (action item 5's ledger is
+live in WholeHog's README). The wire stays read-only in the organism, deliberately.
 **Date:** 2026-07-18
 **Deciders:** Richmond
 **Scope:** the whole ecosystem (engines 1–11)

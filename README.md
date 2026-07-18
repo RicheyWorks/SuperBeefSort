@@ -252,6 +252,25 @@ Alongside `src/main`: `src/jmh/java/…/bench/` (JMH benchmarks), `src/test/java
 suite — property, differential, anti-quicksort chaos, concept-drift, co-optimization, and MSD-radix
 tests), and `web/visualizer.html` (the dependency-free step-visualizer).
 
+## The ecosystem
+
+SuperBeefSort is the intake tract of a six-engine organism — this repo's `docs/` is also the
+ecosystem's ADR home ([the SmokeHouse ring](docs/adr-smokehouse-ecosystem-ring.md) ·
+[the outer ring](docs/adr-ecosystem-outer-ring.md) ·
+[the fifth-engine candidates](docs/adr-fifth-engine-candidates.md)):
+
+| Engine | Role |
+|---|---|
+| [CSRBT](https://github.com/RicheyWorks/CSRBT) | the adaptive ordered index — orders the world |
+| **SuperBeefSort** (this repo) | the intake tract — profiles, sorts, feeds in O(n); also SmokeHouse's recovery and compaction engine |
+| [SmokeHouse](https://github.com/RicheyWorks/SmokeHouse) | the log-structured store — durability, tail, watchers, read replicas |
+| [Carver](https://github.com/RicheyWorks/Carver) | the read planner — generalizes profile → select → execute → observe from "which sort" to "which access path" |
+| [Renderer](https://github.com/RicheyWorks/Renderer) | the materialized-view engine — folds the store's tail into live ranked aggregates |
+| [Brine](https://github.com/RicheyWorks/Brine) | the adaptive cache — eviction policy evolved per workload |
+
+Every repo builds against live sibling sources via nested composite builds, ships CI that
+checks the siblings out, and installs locally with `./gradlew publishToMavenLocal`.
+
 ## License
 
 [MIT](LICENSE) © 2026 Richmond
